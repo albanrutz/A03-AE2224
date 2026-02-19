@@ -6,11 +6,17 @@ from tqdm import tqdm
 
 device = "cuda"
 
-# 1. Load model in FP16 and move to GPU
-processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+# 1. Model and Token
+hf_token = "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"
+
+processor = CLIPSegProcessor.from_pretrained(
+    "CIDAS/clipseg-rd64-refined", 
+    token=hf_token
+)
 model = CLIPSegForImageSegmentation.from_pretrained(
     "CIDAS/clipseg-rd64-refined", 
-    torch_dtype=torch.float16
+    torch_dtype=torch.float16,
+    token=hf_token
 ).to(device)
 
 # 2. Load the full 3840x2160 image
