@@ -7,7 +7,7 @@ from tqdm import tqdm
 device = "cuda"
 
 # 1. Model and Token
-hf_token = "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"
+hf_token = ""
 
 processor = CLIPSegProcessor.from_pretrained(
     "CIDAS/clipseg-rd16", 
