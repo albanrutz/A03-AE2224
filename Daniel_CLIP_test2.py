@@ -112,7 +112,8 @@ def generate_zero_shot_heatmap(image_path, text_prompt, target_layer_name='layer
     plt.axis('off')
     plt.imshow(cv2.cvtColor(superimposed_img, cv2.COLOR_BGR2RGB))
     plt.tight_layout()
-    plt.savefig(f"heatmap_{text_prompt.replace(' ', '_')}.png")
+    plt.show()
+    #plt.savefig(f"heatmap_{text_prompt.replace(' ', '_')}.png")
 
 # --- Execution Example ---
 # To test this on your UAVid dataset, simply run:
@@ -124,4 +125,5 @@ def generate_zero_shot_heatmap(image_path, text_prompt, target_layer_name='layer
 #generate_zero_shot_heatmap(r"C:\Users\danie\Desktop\Delft archive\AE2224\000000.png", "a section of a drone photo of a tree")
 generate_zero_shot_heatmap(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq21\Images\000000.png", "an aerial view of a building")
 generate_zero_shot_heatmap(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq21\Images\000000.png", "an aerial view of a road")
+generate_zero_shot_heatmap(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq21\Images\000000.png", "an aerial view of a tree")
 generate_zero_shot_heatmap(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq21\Images\000000.png", "an aerial view of a moving car")
