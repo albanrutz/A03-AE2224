@@ -120,25 +120,14 @@ def sliding_window_segmentation(image_path, labels, patch_size=112):
     plt.tight_layout()
     plt.show()
 
-# --- Execution Example ---
-"""
-uavid_labels = [
-    "this is a segment of an aerial view of a building", 
-    "this is a segment of an aerial view of a road", 
-    #"this is a segment of an aerial view of a static car", 
-    "this is a segment of an aerial view of a tree",
-    "this is a segment of an aerial view of low vegetation",
-    #"a segment of an aerial view of background clutter"
-]
-"""
+
 uavid_labels = [
     "aerial view of a building", 
-    "aerial view of road with no cars", 
-    #"this is a segment of an aerial view of a static car", 
+    "aerial view of road", 
     "aerial view of a tree",
     "aerial view of low vegetation",
     "aerial view of background clutter",
-    "aerial view of road with cars"
+    "aerial view of cars"
 ]
 
 sliding_window_segmentation(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png", uavid_labels)
