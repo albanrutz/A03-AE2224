@@ -10,7 +10,7 @@ from tqdm import tqdm # For a progress bar
 """
 Traditional segmentation + vanilla CLIP approach; Works suprisingly well mostly for "stuff" classes like buildings and roads
 """
-def sliding_window_segmentation(image_path, labels, patch_size=112):
+def sliding_window_segmentation(image_path, labels, patch_size=224):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # ViT-B/32 is much faster for brute-force patching than RN50
     model, preprocess = clip.load("ViT-B/32", device=device)

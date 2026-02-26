@@ -10,6 +10,7 @@ import matplotlib.patches as mpatches
 from tqdm import tqdm
 
 """
+Heuristic-Augmented Multi-Modal Explainable Segmentation (HAMMES)
 This code implements an "Entropy-Alpha Composition" technique to visualize CLIP's patch-level predictions on UAVid images.
 Furthermore Heurtistic-Weighted Panoptic Segmentation engine through Bayesian Prior injection to boost underperforming classes. 
 """
@@ -33,6 +34,38 @@ class SpatialLayerHook:
         self.gradients = grad
     def close(self):
         self.hook.remove()
+
+def multi_kernel_smoothing(seg_map, labels, kernel_dict):
+    H, W = seg_map.shape
+    final_smoothed = np.zeros((H, W), dtype=np.int32)
+    
+    # helper to find keywords in your full labels
+    def get_k_size(full_label):
+        for short_key, size in kernel_dict.items():
+            if short_key in full_label.lower():
+                return size
+        return 3
+
+    # Sort so that the largest 'Stuff' (Road/Buildings) are processed first
+    sorted_labels = sorted(labels, key=lambda l: get_k_size(l), reverse=True)
+    
+    for label_name in sorted_labels:
+        label_idx = labels.index(label_name)
+        k_size = get_k_size(label_name)
+        
+        binary_mask = (seg_map == label_idx).astype(np.uint8)
+        if binary_mask.sum() == 0: continue
+
+        if k_size > 1:
+            if k_size % 2 == 0: k_size += 1
+            # Using medianBlur to kill the 'mini-patch' noise while keeping boundaries
+            binary_mask = cv2.medianBlur(binary_mask, k_size)
+        
+        final_smoothed[binary_mask > 0] = label_idx
+        
+    return final_smoothed
+
+
 
 def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -115,6 +148,8 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
     hook.close()
 
     # --- THE ENTROPY-ALPHA BLENDING LOGIC ---
+
+    global_seg_map = multi_kernel_smoothing(global_seg_map, uavid_labels, custom_kernels)
     # 1. Convert segmentation map to an RGB image
     seg_rgb = uavid_colors[global_seg_map]
     
@@ -124,8 +159,6 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
     alpha_channel = (1.0 - global_entropy_map) * 255
     alpha_channel = np.clip(alpha_channel, 25, 255).astype(np.uint8)
 
-    # 3. Smooth the Alpha and Seg map to remove patch boundaries
-    alpha_channel = cv2.GaussianBlur(alpha_channel, (15, 15), 0)
     
     # 4. Merge into RGBA
     rgba_overlay = np.dstack((seg_rgb, alpha_channel)).astype(np.uint8)
@@ -155,11 +188,26 @@ uavid_labels = [
     "aerial view of cars"              # 5: Red
 ]
 
-manual_weights = {"aerial view of road": 1.05, "aerial view of background clutter": 1.1} # Slightly boost the "clutter" class to see if it helps
+# Define your custom kernels based on physical object size
+custom_kernels = {
+    "building": 5*32,          # Massive structural smoothing
+    "road": 5*32,              # Merge the blocks into a single strip
+    "tree": 3*32,              # Group blobs into clusters
+    "low vegetation": 4*32,
+    "clutter": 2*32,            # Keep some noise for clutter
+    "cars": 2*32 
+}
+
+
+
+
+
+manual_weights = {"aerial view of road": 1.1, "aerial view of background clutter": 1.1, "aerial view of a building": 0.95} # Slightly boost the "clutter" class to see if it helps
 
 image_paths = [
+    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images\file29-6.png",
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png",
-    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png"
+    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png",
 ]
 for image_path in image_paths:
     entropy_alpha_composition(image_path, uavid_labels, manual_weights)
