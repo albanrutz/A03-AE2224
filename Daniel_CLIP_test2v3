@@ -1,0 +1,165 @@
+import torch
+import torch.nn.functional as F
+import clip
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from matplotlib.colors import ListedColormap
+import matplotlib.patches as mpatches
+from tqdm import tqdm
+
+"""
+This code implements an "Entropy-Alpha Composition" technique to visualize CLIP's patch-level predictions on UAVid images.
+Furthermore Heurtistic-Weighted Panoptic Segmentation engine through Bayesian Prior injection to boost underperforming classes. 
+"""
+
+# --- 4070 CONTEXT INITIALIZATION ---
+if torch.cuda.is_available():
+    torch.cuda.init()
+    torch.cuda.set_device(0)
+    _ = torch.ones(1, device="cuda") @ torch.ones(1, device="cuda")
+
+# --- SPATIAL HOOK ---
+class SpatialLayerHook:
+    def __init__(self, module):
+        self.activations = None
+        self.gradients = None
+        self.hook = module.register_forward_hook(self.hook_fn)
+    def hook_fn(self, module, input, output):
+        self.activations = output
+        self.hook_grad = output.register_hook(self.save_gradient)
+    def save_gradient(self, grad):
+        self.gradients = grad
+    def close(self):
+        self.hook.remove()
+
+def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = clip.load("RN50", device=device)
+    model.eval()
+
+    # UAVid Canonical Colors
+    uavid_colors = np.array([
+        [128, 0, 0], [128, 64, 128], [0, 100, 0], 
+        [0, 255, 0], [128, 128, 128], [255, 0, 0]
+    ])
+
+    img_raw = Image.open(image_path).convert("RGB")
+    W, H = img_raw.size
+    cols, rows = W // patch_size, H // patch_size
+    
+    # OUTPUT MATRICES
+    global_seg_map = np.zeros((H, W), dtype=np.int32)
+    global_entropy_map = np.zeros((H, W), dtype=np.float32)
+
+    # Pre-encode text
+    text_tokens = clip.tokenize(labels).to(device)
+    with torch.no_grad():
+        text_features = model.encode_text(text_tokens).float()
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+    
+    weights_vec = torch.tensor([class_weights.get(l, 1.0) for l in labels], device=device).float()
+    hook = SpatialLayerHook(model.visual.layer4)
+
+    print(f"Building Uncertainty-Aware Map: {rows*cols} Patches...")
+
+    for r in range(rows):
+        for c in tqdm(range(cols), desc=f"Row {r+1}"):
+            left, upper = c * patch_size, r * patch_size
+            patch = img_raw.crop((left, upper, left + patch_size, upper + patch_size))
+            
+            img_t = preprocess(patch).unsqueeze(0).to(device).type(model.dtype)
+            img_t.requires_grad = True
+
+            with torch.amp.autocast('cuda'):
+                features_raw = model.encode_image(img_t)
+                features = features_raw.clone().float()
+                features = features / features.norm(dim=-1, keepdim=True)
+                
+                logits = model.logit_scale.exp().float() * (features @ text_features.T)
+                weighted_logits = logits * weights_vec
+                probs_t = torch.softmax(weighted_logits, dim=-1)
+                probs = probs_t.detach().cpu().numpy()[0]
+
+                # NORMALIZED ENTROPY: 0 (certain) to 1 (guessing)
+                entropy = -torch.sum(probs_t * torch.log(probs_t + 1e-8)) / np.log(len(labels))
+                entropy_val = entropy.item()
+
+            # --- GRAD-CAM ---
+            cams = []
+            for i in range(len(labels)):
+                model.zero_grad()
+                score = (features @ text_features[i].unsqueeze(1))
+                score.backward(retain_graph=True)
+                torch.cuda.synchronize()
+                
+                if hook.gradients is not None:
+                    g, a = hook.gradients.clone().float(), hook.activations.clone().float()
+                    w = torch.mean(g, dim=[2, 3], keepdim=True)
+                    cam = F.relu(torch.sum(w * a, dim=1, keepdim=True)).squeeze().cpu().detach().numpy()
+                    cams.append(((cam - cam.min()) / (cam.max() + 1e-8)) * probs[i])
+                else:
+                    cams.append(np.zeros((7, 7)))
+
+            # --- FUSION & STAMPING ---
+            winning_map_small = np.argmax(np.stack(cams), axis=0)
+            winning_map = cv2.resize(winning_map_small.astype(np.uint8), (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
+            
+            global_seg_map[upper:upper+patch_size, left:left+patch_size] = winning_map
+            global_entropy_map[upper:upper+patch_size, left:left+patch_size] = entropy_val
+
+            del img_t, features_raw, features
+            torch.cuda.empty_cache()
+
+    hook.close()
+
+    # --- THE ENTROPY-ALPHA BLENDING LOGIC ---
+    # 1. Convert segmentation map to an RGB image
+    seg_rgb = uavid_colors[global_seg_map]
+    
+    # 2. Create the Alpha Channel: High Entropy = Low Alpha
+    # We clip the entropy to ensure we don't go perfectly invisible (min alpha 0.1)
+    # Alpha = (1 - Entropy) scaled to 0-255
+    alpha_channel = (1.0 - global_entropy_map) * 255
+    alpha_channel = np.clip(alpha_channel, 25, 255).astype(np.uint8)
+
+    # 3. Smooth the Alpha and Seg map to remove patch boundaries
+    alpha_channel = cv2.GaussianBlur(alpha_channel, (15, 15), 0)
+    
+    # 4. Merge into RGBA
+    rgba_overlay = np.dstack((seg_rgb, alpha_channel)).astype(np.uint8)
+
+    # --- VISUALIZATION ---
+    plt.figure(figsize=(20, 12))
+    plt.imshow(np.array(img_raw))
+    plt.imshow(rgba_overlay) # Overlays directly using the internal alpha channel
+    
+    plt.title("Entropy-Weighted Transparency Map (Faded = Uncertain)", fontsize=16)
+    
+    # Legend
+    legend_handles = [mpatches.Patch(color=uavid_colors[i]/255.0, label=labels[i].split()[-1].capitalize()) for i in range(len(labels))]
+    plt.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, -0.08), ncol=6, fontsize=12)
+    
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+# --- RUN ---
+uavid_labels = [
+    "aerial view of a building",       # 0: Maroon
+    "aerial view of road",             # 1: Purple
+    "aerial view of a tree",           # 2: Dark Green
+    "aerial view of low vegetation",   # 3: Lime
+    "aerial view of background clutter",# 4: Gray
+    "aerial view of cars"              # 5: Red
+]
+
+manual_weights = {"aerial view of road": 1.05, "aerial view of background clutter": 1.1} # Slightly boost the "clutter" class to see if it helps
+
+image_paths = [
+    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png",
+    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png"
+]
+for image_path in image_paths:
+    entropy_alpha_composition(image_path, uavid_labels, manual_weights)

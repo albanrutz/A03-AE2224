@@ -4,9 +4,8 @@ import clip
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 from PIL import Image
-from tqdm import tqdm 
+from tqdm import tqdm
 
 class SpatialLayerHook:
     def __init__(self, module):
@@ -16,7 +15,6 @@ class SpatialLayerHook:
 
     def hook_fn(self, module, input, output):
         self.activations = output
-        # Capture gradients during backward pass
         self.hook_grad = output.register_hook(self.save_gradient)
 
     def save_gradient(self, grad):
@@ -25,83 +23,102 @@ class SpatialLayerHook:
     def close(self):
         self.hook.remove()
 
-def sliding_window_gradcam(image_path, text_prompt="an aerial view of a building", patch_size=224):
+def analyze_all_patches_gradcam(image_path, labels, patch_size=224):
+    # 1. Hardware Initialization
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # Load RN50 (ResNet version of CLIP)
     model, preprocess = clip.load("RN50", device=device)
-    model.eval() # Ensure we are in eval mode for Grad-CAM
+    model.eval()
 
-    # 1. Load and Slice Image
+    # 2. Image Slicing Setup
     original_image = Image.open(image_path).convert("RGB")
     W, H = original_image.size
     cols, rows = W // patch_size, H // patch_size
     
-    # 2. Attach Hook ONCE outside the loop
+    # 3. Setup Hook and Text Encodings
     target_layer = model.visual.layer4
     hook = SpatialLayerHook(target_layer)
 
-    # 3. Prepare Text Vector
-    text_tensor = clip.tokenize([text_prompt]).to(device)
+    text_tokens = clip.tokenize(labels).to(device)
     with torch.no_grad():
-        text_features = model.encode_text(text_tensor)
+        text_features = model.encode_text(text_tokens)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-    # 4. Iterate through the grid
+    print(f"Starting analysis for {rows * cols} patches...")
+
+    # 4. Main Loop across the Grid
     for r in range(rows):
         for c in range(cols):
             left, upper = c * patch_size, r * patch_size
             right, lower = left + patch_size, upper + patch_size
-            
-            # Extract and preprocess
             patch = original_image.crop((left, upper, right, lower))
-            # Critical: Cast to model.dtype (float16) for your 4070
+            
+            # Prepare image tensor (float16 for 4070)
             image_tensor = preprocess(patch).unsqueeze(0).to(device).type(model.dtype)
 
             # --- FORWARD PASS ---
             image_features = model.encode_image(image_tensor)
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-
-            # Calculate similarity
-            similarity_score = (image_features * text_features).sum()
-
-            # --- BACKWARD PASS ---
-            model.zero_grad()
-            similarity_score.backward(retain_graph=True)
-
-            # --- HEATMAP GENERATION ---
-            gradients = hook.gradients 
-            activations = hook.activations 
-
-            # Calculate channel weights
-            weights = torch.mean(gradients, dim=[2, 3], keepdim=True)
-            heatmap = torch.sum(weights * activations, dim=1, keepdim=True)
-            heatmap = F.relu(heatmap)
-
-            # Normalize and Convert to NumPy
-            heatmap_np = heatmap.squeeze().cpu().detach().numpy().astype(np.float32)
-            heatmap_np = (heatmap_np - np.min(heatmap_np)) / (np.max(heatmap_np) + 1e-8)
-
-            # --- VISUALIZATION ---
-            original_patch_cv = cv2.cvtColor(np.array(patch), cv2.COLOR_RGB2BGR)
-            heatmap_resized = cv2.resize(heatmap_np, (patch_size, patch_size))
-            heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_resized), cv2.COLORMAP_JET)
             
-            superimposed = cv2.addWeighted(original_patch_cv, 0.5, heatmap_colored, 0.5, 0)
+            # Get probabilities
+            logit_scale = model.logit_scale.exp()
+            probs = (logit_scale * (image_features @ text_features.T)).softmax(dim=-1).detach().cpu().numpy()[0]
 
-            # Show every patch (Warning: this will pop up MANY windows if the image is big)
-            # Consider adding a "plt.close()" or saving to disk instead
-            plt.figure(figsize=(8, 4))
-            plt.subplot(1, 2, 1)
-            plt.imshow(np.array(patch))
-            plt.axis('off')
-            plt.subplot(1, 2, 2)
-            plt.imshow(cv2.cvtColor(superimposed, cv2.COLOR_BGR2RGB))
-            plt.title(f"Score: {similarity_score.item():.3f}")
-            plt.axis('off')
-            plt.show()
+            # --- MULTI-LABEL BACKWARD PASSES ---
+            patch_heatmaps = []
+            for i in range(len(labels)):
+                model.zero_grad()
+                # We need to maximize the similarity for each specific label
+                score = (image_features @ text_features[i].unsqueeze(1))
+                score.backward(retain_graph=True)
+
+                # Grad-CAM logic: (Grads * Activations)
+                weights = torch.mean(hook.gradients, dim=[2, 3], keepdim=True)
+                cam = torch.sum(weights * hook.activations, dim=1, keepdim=True)
+                cam = F.relu(cam)
+                
+                cam_np = cam.squeeze().cpu().detach().numpy().astype(np.float32)
+                patch_heatmaps.append(cam_np)
+
+            # 5. Visual Rendering for this Patch
+            global_max = max([h.max() for h in patch_heatmaps]) + 1e-8
+            num_labels = len(labels)
+            
+            fig, axes = plt.subplots(1, num_labels + 1, figsize=(3 * (num_labels + 1), 4))
+            
+            # Subplot 0: Original
+            axes[0].imshow(np.array(patch))
+            axes[0].set_title(f"Patch [{r},{c}]")
+            axes[0].axis('off')
+
+            # Subplots 1..N: Class Heatmaps
+            for i in range(num_labels):
+                h_norm = patch_heatmaps[i] / global_max
+                h_resized = cv2.resize(h_norm, (patch_size, patch_size))
+                
+                # Apply JET colormap and overlay
+                heatmap_colored = cv2.applyColorMap(np.uint8(255 * h_resized), cv2.COLORMAP_JET)
+                heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+                superimposed = cv2.addWeighted(np.array(patch), 0.5, heatmap_rgb, 0.5, 0)
+                
+                axes[i+1].imshow(superimposed)
+                axes[i+1].set_title(f"{labels[i].split()[-1]}\n{probs[i]:.1%}") # Show last word of label
+                axes[i+1].axis('off')
+
+            plt.tight_layout()
+            plt.show() # Set to plt.savefig() if you want to run unattended
+            # plt.close(fig) # Uncomment this if you run into memory issues
 
     hook.close()
 
-# Run it!
-sliding_window_gradcam(r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png")
+# --- Execution ---
+uavid_labels = [
+    "aerial view of a building", 
+    "aerial view of road", 
+    "aerial view of a tree",
+    "aerial view of low vegetation",
+    "aerial view of background clutter",
+    "aerial view of cars"
+]
+
+image_file = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png"
+analyze_all_patches_gradcam(image_file, uavid_labels)

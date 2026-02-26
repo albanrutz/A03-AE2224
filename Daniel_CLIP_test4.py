@@ -8,7 +8,7 @@ from matplotlib.colors import ListedColormap
 from PIL import Image
 from tqdm import tqdm # For a progress bar
 """
-Traditional segmentation + vanilla CLIP approach 
+Traditional segmentation + vanilla CLIP approach; Works suprisingly well mostly for "stuff" classes like buildings and roads
 """
 def sliding_window_segmentation(image_path, labels, patch_size=112):
     device = "cuda" if torch.cuda.is_available() else "cpu"

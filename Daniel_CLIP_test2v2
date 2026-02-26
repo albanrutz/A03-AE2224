@@ -1,0 +1,173 @@
+import torch
+import torch.nn.functional as F
+import clip
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from torch.amp import autocast
+from matplotlib.colors import ListedColormap
+import matplotlib.patches as mpatches
+
+"""
+The hidden layer Grad-CAM approch. This version analyses every patch
+separately and produces a diagnostic grid of CAMs for each patch and each label.
+Used for visualization and fine tuning of the final patch-level segmentation approach.
+"""
+# ==========================================
+# 1. THE DIAGNOSTIC ENGINE
+# ==========================================
+
+class SpatialLayerHook:
+    def __init__(self, module):
+        self.activations = None
+        self.gradients = None
+        self.hook = module.register_forward_hook(self.hook_fn)
+
+    def hook_fn(self, module, input, output):
+        self.activations = output
+        self.hook_grad = output.register_hook(self.save_gradient)
+
+    def save_gradient(self, grad):
+        self.gradients = grad
+
+    def close(self):
+        self.hook.remove()
+
+def patch_level_diagnostic(image_path, labels, patch_size=224):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = clip.load("RN50", device=device)
+    model.eval()
+
+    # --- AEROSPACE ENGINEERING COLOR MAPPING ---
+    # Indices: 0:Building, 1:Road, 2:Tree, 3:LowVeg, 4:Clutter, 5:Cars
+    uavid_colors = np.array([
+        [128, 0, 0],    # 0: Building (Dark Red/Maroon)
+        [128, 64, 128], # 1: Road (Purple)
+        [0, 100, 0],    # 2: Tree (Dark Green)
+        [0, 255, 0],    # 3: Low Vegetation (Lime)
+        [128, 128, 128],# 4: Background Clutter (Gray)
+        [255, 0, 0]     # 5: Cars (Pure Red)
+    ])
+    
+    # Create the colormap for the segmentation subplot
+    custom_cmap = ListedColormap(uavid_colors / 255.0)
+
+    # 1. Image and Text Setup
+    original_img = Image.open(image_path).convert("RGB")
+    W, H = original_img.size
+    cols, rows = W // patch_size, H // patch_size
+
+    text_tokens = clip.tokenize(labels).to(device)
+    with torch.no_grad():
+        text_features = model.encode_text(text_tokens).detach().float()
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+    target_layer = model.visual.layer4
+    hook = SpatialLayerHook(target_layer)
+
+    for r in range(rows):
+        for c in range(cols):
+            left, upper = c * patch_size, r * patch_size
+            patch = original_img.crop((left, upper, left + patch_size, upper + patch_size))
+            
+            img_tensor = preprocess(patch).unsqueeze(0).to(device).type(model.dtype)
+            img_tensor.requires_grad = True 
+
+            # Forward Pass
+            with torch.amp.autocast('cuda'):
+                image_features_raw = model.encode_image(img_tensor)
+                image_features = image_features_raw.clone().float() 
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                
+                logit_scale = model.logit_scale.exp()
+                logits = logit_scale.float() * (image_features @ text_features.T)
+                probs = torch.softmax(logits, dim=-1).detach().cpu().numpy()[0]
+
+            # Multi-Backward Pass
+            cams = []
+            for i in range(len(labels)):
+                model.zero_grad()
+                score = (image_features @ text_features[i].unsqueeze(1))
+                score.backward(retain_graph=True)
+                
+                torch.cuda.synchronize()
+                if hook.gradients is not None:
+                    grads, acts = hook.gradients.float(), hook.activations.float()
+                    weights = torch.mean(grads, dim=[2, 3], keepdim=True)
+                    cam = torch.sum(weights * acts, dim=1, keepdim=True)
+                    cam = F.relu(cam).squeeze().cpu().detach().numpy()
+                    
+                    # Probability weighting for fusion
+                    cam = (cam - cam.min()) / (cam.max() + 1e-8)
+                    cams.append(cam * probs[i])
+                else:
+                    cams.append(np.zeros((7, 7)))
+
+            # Winner-Take-All Fusion
+            stacked_cams = np.stack(cams)
+            winning_map_small = np.argmax(stacked_cams, axis=0)
+            winning_map = cv2.resize(winning_map_small.astype(np.uint8), (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
+
+            # --- VISUALIZATION GRID ---
+            fig = plt.figure(figsize=(22, 10))
+            gs = fig.add_gridspec(2, 5) # 2 rows, 5 columns to fit Original + 6 CAMs + Decision
+
+            # 1. Original Patch
+            ax0 = fig.add_subplot(gs[0, 0])
+            ax0.imshow(np.array(patch))
+            ax0.set_title(f"Patch [{r},{c}]", fontweight='bold')
+            ax0.axis('off')
+
+            # 2. Individual Heatmaps (Iterating over your 6 labels)
+            global_max = max([c.max() for c in cams]) + 1e-8
+            for i in range(len(labels)):
+                # Determine position in grid
+                row_idx = 0 if i < 4 else 1 # Split into rows
+                col_idx = (i + 1) if i < 4 else (i - 4 + 1)
+                
+                ax = fig.add_subplot(gs[row_idx, col_idx])
+                h_resized = cv2.resize(cams[i]/global_max, (patch_size, patch_size))
+                h_color = cv2.applyColorMap(np.uint8(255 * h_resized), cv2.COLORMAP_JET)
+                h_rgb = cv2.cvtColor(h_color, cv2.COLOR_BGR2RGB)
+                overlay = cv2.addWeighted(np.array(patch), 0.5, h_rgb, 0.5, 0)
+                
+                ax.imshow(overlay)
+                ax.set_title(f"{labels[i].split()[-1].capitalize()}\nConf: {probs[i]:.1%}")
+                ax.axis('off')
+
+            # 3. Final Decision + Legend
+            ax_dec = fig.add_subplot(gs[1, 0])
+            ax_dec.imshow(np.array(patch), alpha=0.4)
+            ax_dec.imshow(winning_map, cmap=custom_cmap, vmin=0, vmax=len(uavid_colors)-1, alpha=0.7)
+            ax_dec.set_title("Fused Decision", fontweight='bold')
+            ax_dec.axis('off')
+
+            # Build Legend Patches
+            legend_handles = [
+                mpatches.Patch(color=uavid_colors[i]/255.0, label=labels[i].split()[-1].capitalize()) 
+                for i in range(len(labels))
+            ]
+            ax_dec.legend(handles=legend_handles, loc='upper left', bbox_to_anchor=(0, -0.1), ncol=2, fontsize=9)
+
+            plt.tight_layout()
+            plt.show()
+
+            # Clean up
+            del img_tensor, image_features, image_features_raw
+            torch.cuda.empty_cache()
+
+    hook.close()
+
+# --- RUN DIAGNOSTIC ---
+uavid_labels = [
+    "aerial view of a building",       # 0: Maroon
+    "aerial view of road",             # 1: Purple
+    "aerial view of a tree",           # 2: Dark Green
+    "aerial view of low vegetation",   # 3: Lime
+    "aerial view of background clutter",# 4: Gray
+    "aerial view of cars"              # 5: Red
+]
+
+image_path = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png"
+patch_level_diagnostic(image_path, uavid_labels)

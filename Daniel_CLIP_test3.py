@@ -7,7 +7,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap
 from PIL import Image
 """
-Magic in CLIP hidden layers, Doesn't work very well
+Another Magic in CLIP hidden layers, Doesn't work very well
 """
 
 def generate_vit_segmentation_map(image_path, labels):
