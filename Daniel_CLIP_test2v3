@@ -8,6 +8,7 @@ from PIL import Image
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
 from tqdm import tqdm
+from mIoU_metric import calculate_uavid_iou_mapped
 
 """
 Heuristic-Augmented Multi-Modal Explainable Segmentation (HAMMES)
@@ -149,7 +150,7 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
 
     # --- THE ENTROPY-ALPHA BLENDING LOGIC ---
 
-    global_seg_map = multi_kernel_smoothing(global_seg_map, uavid_labels, custom_kernels)
+    global_seg_map = multi_kernel_smoothing(global_seg_map, model_labels, custom_kernels)
     # 1. Convert segmentation map to an RGB image
     seg_rgb = uavid_colors[global_seg_map]
     
@@ -177,9 +178,10 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
     plt.axis('off')
     plt.tight_layout()
     plt.show()
+    return global_seg_map
 
 # --- RUN ---
-uavid_labels = [
+model_labels = [
     "aerial view of a building",       # 0: Maroon
     "aerial view of road",             # 1: Purple
     "aerial view of a tree",           # 2: Dark Green
@@ -205,9 +207,12 @@ custom_kernels = {
 manual_weights = {"aerial view of road": 1.1, "aerial view of background clutter": 1.1, "aerial view of a building": 0.95} # Slightly boost the "clutter" class to see if it helps
 
 image_paths = [
+    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images\000000.png", 
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images\file29-6.png",
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png",
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png",
 ]
 for image_path in image_paths:
-    entropy_alpha_composition(image_path, uavid_labels, manual_weights)
+    global_seg_map = entropy_alpha_composition(image_path, model_labels, manual_weights)
+
+    calculate_uavid_iou_mapped(global_seg_map, r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Labels\000000.png", model_labels)
