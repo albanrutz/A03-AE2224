@@ -8,8 +8,7 @@ from PIL import Image
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
 from tqdm import tqdm
-from mIoU_metric import calculate_uavid_iou_mapped
-
+import scoring2 
 """
 Heuristic-Augmented Multi-Modal Explainable Segmentation (HAMMES)
 This code implements an "Entropy-Alpha Composition" technique to visualize CLIP's patch-level predictions on UAVid images.
@@ -216,7 +215,53 @@ image_paths = [
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png",
     r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png",
 ]
+def segment_mask_to_rgb(global_seg_map, labels_order):
+    """
+    Converts a 2D segmentation map of integer indices into a 3D RGB image array.
+    
+    Args:
+        global_seg_map (np.ndarray): 2D array of class indices (e.g., shape HxW).
+        labels_order (list): A list of strings dictating which index maps to which class.
+                             e.g., labels_order[0] = "building".
+    Returns:
+        np.ndarray: 3D array of shape (H, W, 3) in RGB format (uint8).
+    """
+    uavid_gt_colors = {
+        "building":    [128, 0, 0],
+        "road":        [128, 64, 128],
+        "tree":        [0, 128, 0],
+        "low_veg":     [128, 128, 0],
+        "clutter":     [0, 0, 0],
+        "car":  [192, 0, 192],
+        "human":       [64, 64, 0]
+    }
+
+    # 1. Build the Color Matrix (N x 3)
+    # This aligns the dictionary colors with the integer indices in your mask.
+    num_classes = len(labels_order)
+    color_matrix = np.zeros((num_classes, 3), dtype=np.uint8)
+    
+    for i, label in enumerate(labels_order):
+        if label in uavid_gt_colors:
+            color_matrix[i] = uavid_gt_colors[label]
+        else:
+            # Fallback color (e.g., white) if a label isn't in the dictionary
+            color_matrix[i] = [255, 255, 255]
+
+    # 2. Vectorized Matrix Mapping
+    # NumPy replaces every integer 'i' in the 2D map with the 3-element array at color_matrix[i].
+    rgb_image = color_matrix[global_seg_map]
+
+    return rgb_image
+
 for image_path in image_paths:
     global_seg_map = entropy_alpha_composition(image_path, model_labels, manual_weights)
-
-    calculate_uavid_iou_mapped(global_seg_map, r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Labels\000000.png", model_labels)
+    rgb_seg_map = segment_mask_to_rgb(global_seg_map, model_labels)
+    plt.figure(figsize=(10, 8))
+    plt.imshow(rgb_seg_map)
+    plt.axis('off')  # Hides the coordinate axes for a cleaner visualization
+    plt.title("UAV Image Display")
+    plt.tight_layout()
+    plt.show()
+    scoring2.evaluate_pair(image_path, global_seg_map, model_labels)
+    
