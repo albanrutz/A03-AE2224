@@ -35,8 +35,8 @@ for file_i in files_list:
 
     # 4. Prepare Text Prompts
     # CLIP works best when the object is used in a sentence
-    text_options = ["Segment of Building in red square within drone image", "Segment of Road in red square within drone image", "Segment of Static car in red square within drone image", "Segment of Tree in red square within drone image", "Segment of Low vegetation in red square within drone image", "Segment of Human in red square within drone image", "Segment of Moving car in red square within drone image", "Segment of Background clutter in red square within drone image"]
-    #text_options = ["UAV photo of Building", "UAV photo of Road", "UAV photo of Static car", "UAV photo of Tree", "UAV photo of Low vegetation", "UAV photo of Human", "UAV photo of Moving car", "UAV photo of Background clutter"]
+    text_options = ["photo of a energy drink can", "photo of a car", "photo of a red bull car", "photo of a red bull can"]
+                    #text_options = ["UAV photo of Building", "UAV photo of Road", "UAV photo of Static car", "UAV photo of Tree", "UAV photo of Low vegetation", "UAV photo of Human", "UAV photo of Moving car", "UAV photo of Background clutter"]
     text_tokens = clip.tokenize(text_options).to(device)
 
     # 5. Calculate Features & Probabilities

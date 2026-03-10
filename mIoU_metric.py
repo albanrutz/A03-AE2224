@@ -12,7 +12,7 @@ def calculate_uavid_iou_mapped(pred_map, gt_image_path, model_labels):
     
     # Resize prediction if needed to match GT exactly
     if pred_map.shape != (H, W):
-        pred_map = cv2.resize(pred_map.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST)
+        pred_map = pred_map[:H, :W]
 
     # 2. Define the STRICT UAVid RGB Values (as provided)
     uavid_gt_colors = {
@@ -28,14 +28,13 @@ def calculate_uavid_iou_mapped(pred_map, gt_image_path, model_labels):
 
     # 3. Define the Mapping: Which GT colors belong to which Model Index?
     # Ensure these indices match your model's output indices exactly!
-    # model_labels = ["building", "road", "tree", "low vegetation", "clutter", "cars"]
     mapping = {
         0: ["building"],
         1: ["road"],
         2: ["tree"],
         3: ["low_veg"],
         4: ["clutter"],
-        5: ["static_car", "moving_car"] # <--- THE MERGE: Both map to index 5
+        5: ["static_car", "moving_car"],
     }
 
     # Create a 2D Ground Truth map matched to MODEL INDICES
