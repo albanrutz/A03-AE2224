@@ -75,8 +75,7 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
 
     # UAVid Canonical Colors
     uavid_colors = np.array([
-        [128, 0, 0], [128, 64, 128], [0, 100, 0], 
-        [0, 255, 0], [128, 128, 128], [255, 0, 0]
+        [128, 0, 0], [128, 64, 128], [0, 128, 0], [128, 128, 0], [0, 0, 0], [192, 0, 192], [64, 64, 0]
     ])
 
     img_raw = Image.open(image_path).convert("RGB")
@@ -187,17 +186,22 @@ model_labels = [
     "aerial view of a tree",           # 2: Dark Green
     "aerial view of low vegetation",   # 3: Lime
     "aerial view of background clutter",# 4: Gray
-    "aerial view of cars"              # 5: Red
+    "aerial view of car",              # 5: Red
+    "aerial view of human"              # 6: Olive
 ]
+
+        
+
 
 # Define your custom kernels based on physical object size
 custom_kernels = {
     "building": 5*32,          # Massive structural smoothing
     "road": 5*32,              # Merge the blocks into a single strip
     "tree": 3*32,              # Group blobs into clusters
-    "low vegetation": 4*32,
+    "low_veg": 4*32,
     "clutter": 2*32,            # Keep some noise for clutter
-    "cars": 2*32 
+    "car": 2*32, 
+    "human": 1*32              # Minimal smoothing for small objects
 }
 
 

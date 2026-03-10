@@ -8,33 +8,35 @@ def calculate_uavid_iou_mapped(pred_map, gt_image_path, model_labels):
     """
     # 1. Load Ground Truth
     gt_rgb = np.array(Image.open(gt_image_path).convert("RGB"))
-    H, W, _ = gt_rgb.shape
+    H, W = pred_map.shape[:2]
     
-    # Resize prediction if needed to match GT exactly
-    if pred_map.shape != (H, W):
-        pred_map = pred_map[:H, :W]
+    # Slice GT to match prediction map size
+    gt_rgb = gt_rgb[:H, :W]
 
     # 2. Define the STRICT UAVid RGB Values (as provided)
     uavid_gt_colors = {
-        "building":    [110, 27, 21],
-        "road":        [115, 70, 122],
-        "tree":        [65, 125, 40],
-        "low_veg":     [124, 127, 44],
+        "building":    [128, 0, 0],
+        "road":        [128, 64, 128],
+        "tree":        [0, 128, 0],
+        "low_veg":     [128, 128, 0],
         "clutter":     [0, 0, 0],
-        "static_car":  [167, 46, 181],
-        "moving_car":  [60, 20, 120],
-        "human":       [64, 66, 23]
+        "static_car":  [192, 0, 192],
+        "moving_car":  [64, 0, 128],
+        "human":       [64, 64, 0]
     }
 
     # 3. Define the Mapping: Which GT colors belong to which Model Index?
-    # Ensure these indices match your model's output indices exactly!
+    # IMPORTANT: The keys (indices) in this mapping must correspond exactly to your model's output class indices.
+    # If they do not match, IoU calculations will be incorrect because predictions and ground truth will be compared for the wrong classes.
+    # Overlapping classes (e.g., "tree" and "low_veg" both mapped to index 2) mean that pixels of either GT color will be treated as belonging to the same model class.
     mapping = {
         0: ["building"],
         1: ["road"],
-        2: ["tree"],
+        2: ["tree", "low_veg"],
         3: ["low_veg"],
         4: ["clutter"],
         5: ["static_car", "moving_car"],
+        6: ["human"]
     }
 
     # Create a 2D Ground Truth map matched to MODEL INDICES
