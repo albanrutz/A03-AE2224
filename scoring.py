@@ -17,9 +17,8 @@ from PIL import Image
 # =============================================================================
 # INPUT FILE PATHS — set these before running
 # =============================================================================
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Labels"   # Directory containing the ground-truth label images
 
-GT_IMAGE_PATH   = "C:\\CLIP_UAVid\\data\\uavid_val\\seq16\\Labels\\000000.png"   # Path to the ground-truth UAVid label image
-PRED_IMAGE_PATH = "C:\\CLIP_UAVid\\data\\uavid_val\\seq16\\Labels\\000100.png"   # Path to the model output image
 
 # =============================================================================
 # CATEGORY COLOUR MAP
@@ -269,13 +268,15 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
 # =============================================================================
 
 if __name__ == "__main__":
-    validate_colour_map(CATEGORY_COLOURS)
-    categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS)
+    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    for GT_IMAGE_PATH in image_paths:
+         PRED_IMAGE_PATH = GT_IMAGE_PATH.replace("Labels", "Predictions")   # Path to the model output image
+         categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS)
 
-    if MERGE_CARS:
-        print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
+         if MERGE_CARS:
+             print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
 
-    per_class, miou, _ = evaluate_pair(
-        GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
-    )
-    print_results(per_class, miou, image_name=os.path.basename(PRED_IMAGE_PATH))
+         per_class, miou, _ = evaluate_pair(
+             GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
+         )
+         print_results(per_class, miou, image_name=os.path.basename(PRED_IMAGE_PATH))

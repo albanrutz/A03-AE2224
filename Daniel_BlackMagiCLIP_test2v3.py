@@ -8,7 +8,7 @@ from PIL import Image
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
 from tqdm import tqdm
-import scoring2 
+import os
 """
 Heuristic-Augmented Multi-Modal Explainable Segmentation (HAMMES)
 This code implements an "Entropy-Alpha Composition" technique to visualize CLIP's patch-level predictions on UAVid images.
@@ -67,7 +67,7 @@ def multi_kernel_smoothing(seg_map, labels, kernel_dict):
 
 
 
-def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224):
+def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224, show_visualization=False, swSmoothing=False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, preprocess = clip.load("RN50", device=device)
     model.eval()
@@ -147,8 +147,8 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
     hook.close()
 
     # --- THE ENTROPY-ALPHA BLENDING LOGIC ---
-
-    global_seg_map = multi_kernel_smoothing(global_seg_map, model_labels, custom_kernels)
+    if swSmoothing:
+        global_seg_map = multi_kernel_smoothing(global_seg_map, model_labels, custom_kernels)
     # 1. Convert segmentation map to an RGB image
     seg_rgb = uavid_colors[global_seg_map]
     
@@ -163,58 +163,22 @@ def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224)
     rgba_overlay = np.dstack((seg_rgb, alpha_channel)).astype(np.uint8)
 
     # --- VISUALIZATION ---
-    plt.figure(figsize=(20, 12))
-    plt.imshow(np.array(img_raw))
-    plt.imshow(rgba_overlay) # Overlays directly using the internal alpha channel
-    
-    plt.title("Entropy-Weighted Transparency Map (Faded = Uncertain)", fontsize=16)
-    
-    # Legend
-    legend_handles = [mpatches.Patch(color=uavid_colors[i]/255.0, label=labels[i].split()[-1].capitalize()) for i in range(len(labels))]
-    plt.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, -0.08), ncol=6, fontsize=12)
-    
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+    if show_visualization:
+        plt.figure(figsize=(20, 12))
+        plt.imshow(np.array(img_raw))
+        plt.imshow(rgba_overlay) # Overlays directly using the internal alpha channel
+        
+        plt.title("Entropy-Weighted Transparency Map (Faded = Uncertain)", fontsize=16)
+        
+        # Legend
+        legend_handles = [mpatches.Patch(color=uavid_colors[i]/255.0, label=labels[i].split()[-1].capitalize()) for i in range(len(labels))]
+        plt.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, -0.08), ncol=6, fontsize=12)
+        
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
     return global_seg_map
 
-# --- RUN ---
-model_labels = [
-    "aerial view of a building",       # 0: Maroon
-    "aerial view of road",             # 1: Purple
-    "aerial view of a tree",           # 2: Dark Green
-    "aerial view of low vegetation",   # 3: Lime
-    "aerial view of background clutter",# 4: Gray
-    "aerial view of car",              # 5: Red
-    "aerial view of human"              # 6: Olive
-]
-
-        
-
-
-# Define your custom kernels based on physical object size
-custom_kernels = {
-    "building": 5*32,          # Massive structural smoothing
-    "road": 5*32,              # Merge the blocks into a single strip
-    "tree": 3*32,              # Group blobs into clusters
-    "low_veg": 4*32,
-    "clutter": 2*32,            # Keep some noise for clutter
-    "car": 2*32, 
-    "human": 1*32              # Minimal smoothing for small objects
-}
-
-
-
-
-
-manual_weights = {"aerial view of road": 1.1, "aerial view of background clutter": 1.1, "aerial view of a building": 0.95} # Slightly boost the "clutter" class to see if it helps
-
-image_paths = [
-    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images\000000.png", 
-    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images\file29-6.png",
-    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images\file14-2.png",
-    r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_test\seq22\Images\000000.png",
-]
 def segment_mask_to_rgb(global_seg_map, labels_order):
     """
     Converts a 2D segmentation map of integer indices into a 3D RGB image array.
@@ -232,7 +196,7 @@ def segment_mask_to_rgb(global_seg_map, labels_order):
         "tree":        [0, 128, 0],
         "low_veg":     [128, 128, 0],
         "clutter":     [0, 0, 0],
-        "car":  [192, 0, 192],
+        "car":         [192, 0, 192],
         "human":       [64, 64, 0]
     }
 
@@ -254,14 +218,77 @@ def segment_mask_to_rgb(global_seg_map, labels_order):
 
     return rgb_image
 
-for image_path in image_paths:
-    global_seg_map = entropy_alpha_composition(image_path, model_labels, manual_weights)
-    rgb_seg_map = segment_mask_to_rgb(global_seg_map, model_labels)
-    plt.figure(figsize=(10, 8))
-    plt.imshow(rgb_seg_map)
-    plt.axis('off')  # Hides the coordinate axes for a cleaner visualization
-    plt.title("UAV Image Display")
-    plt.tight_layout()
-    plt.show()
-    scoring2.evaluate_pair(image_path, global_seg_map, model_labels)
+# =============================================================================
+# --- RUN EXECUTION BLOCK ---
+# =============================================================================
+
+# 1. The Prompts for CLIP (Maintains context for accuracy)
+model_labels = [
+    "aerial view of a building",       # 0
+    "aerial view of road",             # 1
+    "aerial view of a tree",           # 2
+    "aerial view of low vegetation",   # 3
+    "aerial view of background clutter",# 4
+    "aerial view of car",              # 5
+    "aerial view of human"             # 6
+]
+
+# 2. The Short Keys for the Logic/RGB Mapping Dictionaries
+# CRITICAL: These MUST align perfectly with the indices of model_labels above
+mapping_keys = [
+    "building", "road", "tree", "low_veg", "clutter", "car", "human"
+]
+
+# 3. Physics-based Kernels (Using the short keys)
+custom_kernels = {
+    "building": 5*32,          
+    "road": 5*32,              
+    "tree": 3*32,              
+    "low_veg": 4*32,
+    "clutter": 2*32,            
+    "car": 2*32, 
+    "human": 1*32              
+}
+
+# 4. Bayesian Priors (Using the exact model_labels strings)
+manual_weights = {
+    "aerial view of road": 1.1, 
+    "aerial view of background clutter": 1.1, 
+    "aerial view of a building": 0.95
+}
+
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
+image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
+
+# =============================================================================
+# --- MODIFIED LOOP ---
+# =============================================================================
+
+
+for image_path in image_paths:
+    # 1. Generate the map using the LONG prompts for CLIP
+    global_seg_map = entropy_alpha_composition(image_path, model_labels, manual_weights)
+    
+    # 2. Convert to RGB using the SHORT mapping keys
+    # This prevents the "White Output" bug by ensuring dictionary matches
+    rgb_seg_map = segment_mask_to_rgb(global_seg_map, mapping_keys)
+    
+    # 3. OpenCV Color Space Conversion
+    # CRITICAL: cv2.imwrite expects BGR, but segment_mask_to_rgb outputs RGB.
+    # If we don't flip this, Red Cars become Blue Cars in the saved image.
+    bgr_seg_map = cv2.cvtColor(rgb_seg_map, cv2.COLOR_RGB2BGR)
+    
+    # Optional: Display using OpenCV (Wait for a key press to continue to the next image)
+    # cv2.imshow("RGB Segmentation Map", bgr_seg_map)
+    # cv2.waitKey(0) 
+    
+    # 4. Save the Output
+    # Create the target directory if it doesn't exist to prevent FileNotFoundError
+    save_path = image_path.replace("Images", "Predictions")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    cv2.imwrite(save_path, bgr_seg_map)
+    print(f"Saved prediction to: {save_path}")
+
+# cv2.destroyAllWindows()
