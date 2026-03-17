@@ -67,7 +67,7 @@ def multi_kernel_smoothing(seg_map, labels, kernel_dict):
 
 
 
-def entropy_alpha_composition(image_path, labels, class_weights, patch_size=224, show_visualization=False, swSmoothing=False):
+def entropy_alpha_composition(image_path, labels, class_weights, patch_size=int(224*1.5), show_visualization=True, swSmoothing=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, preprocess = clip.load("RN50", device=device)
     model.eval()

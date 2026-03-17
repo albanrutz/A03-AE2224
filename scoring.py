@@ -17,7 +17,7 @@ from PIL import Image
 # =============================================================================
 # INPUT FILE PATHS — set these before running
 # =============================================================================
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Labels"   # Directory containing the ground-truth label images
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Predictions"  
 
 
 # =============================================================================
@@ -46,6 +46,7 @@ CATEGORY_COLOURS = {
 # =============================================================================
 
 MERGE_CARS = True
+MERGE_VEGETATION = False
 
 # =============================================================================
 # END OF CONFIGURATION — no changes needed below this line
@@ -69,39 +70,48 @@ def validate_colour_map(colour_map):
         )
 
 
-def build_colour_index(colour_map, merge_cars=False):
+def build_colour_index(colour_map, merge_cars=False, merge_vegetation=False):
     """
     Build a lookup from RGB tuple -> category index.
     Also returns the ordered list of category names.
 
-    If merge_cars=True, both "Static Car" and "Moving Car" map to the
-    same index and the merged category is labelled "Car".
+    If merge_cars=True, both "Static Car" and "Moving Car" map to "Car".
+    If merge_vegetation=True, both "Tree" and "Low Vegetation" map to "Vegetation".
     """
-    if merge_cars:
-        # Build a collapsed category list with "Car" in place of both car types
+    if merge_cars or merge_vegetation:
         merged_categories = []
         seen_car = False
+        seen_veg = False
+        
+        # Build the collapsed category list
         for name in colour_map:
-            if name in ("Static Car", "Moving Car"):
+            if merge_cars and name in ("Static Car", "Moving Car"):
                 if not seen_car:
                     merged_categories.append("Car")
                     seen_car = True
+            elif merge_vegetation and name in ("Tree", "Low Vegetation"):
+                if not seen_veg:
+                    merged_categories.append("Vegetation")
+                    seen_veg = True
             else:
                 merged_categories.append(name)
 
         # Assign indices based on merged list
-        car_idx = merged_categories.index("Car")
         colour_to_idx = {}
         name_to_idx = {name: idx for idx, name in enumerate(merged_categories)}
 
+        # Map each RGB colour to its new (or original) index
         for name, rgb in colour_map.items():
-            if name in ("Static Car", "Moving Car"):
-                colour_to_idx[rgb] = car_idx
+            if merge_cars and name in ("Static Car", "Moving Car"):
+                colour_to_idx[rgb] = name_to_idx["Car"]
+            elif merge_vegetation and name in ("Tree", "Low Vegetation"):
+                colour_to_idx[rgb] = name_to_idx["Vegetation"]
             else:
                 colour_to_idx[rgb] = name_to_idx[name]
 
         return merged_categories, colour_to_idx
     else:
+        # Standard unmerged fallback
         categories = list(colour_map.keys())
         colour_to_idx = {rgb: idx for idx, (_, rgb) in enumerate(colour_map.items())}
         return categories, colour_to_idx
@@ -268,13 +278,16 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
 # =============================================================================
 
 if __name__ == "__main__":
-    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
-    for GT_IMAGE_PATH in image_paths:
-         PRED_IMAGE_PATH = GT_IMAGE_PATH.replace("Labels", "Predictions")   # Path to the model output image
-         categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS)
+    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]# [:1]  # Adjust slicing as needed to evaluate a subset
+    for PRED_IMAGE_PATH in image_paths:
+         GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")   # Path to the ground-truth label image
+         categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION)
 
          if MERGE_CARS:
              print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
+
+         if MERGE_VEGETATION:
+             print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
 
          per_class, miou, _ = evaluate_pair(
              GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
