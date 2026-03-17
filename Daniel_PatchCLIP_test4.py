@@ -7,6 +7,7 @@ import matplotlib.patches as mpatches
 from PIL import Image
 from tqdm import tqdm
 import os
+from scoring_general import save_and_evaluate_single_image
 
 # --- 4070 CONTEXT INITIALIZATION ---
 if torch.cuda.is_available():
@@ -219,13 +220,8 @@ for image_path in image_paths:
     fused_class_map, fused_conf_map = exact_multi_scale_ensemble_matrix(
         image_path, clip_prompts, mapping_keys, scale_class_matrix, sw_plot=sw_plot
     )
-
-    # Convert to RGB and Save
-    rgb_seg_map = segment_mask_to_rgb(fused_class_map, mapping_keys)
-    bgr_seg_map = cv2.cvtColor(rgb_seg_map, cv2.COLOR_RGB2BGR)
-
-    save_path = image_path.replace("Images", "Predictions")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    cv2.imwrite(save_path, bgr_seg_map)
-    print(f"Saved optimized prediction to: {save_path}")
-    sw_plot = False  # Only plot the first image for demonstration
+    results, miou = save_and_evaluate_single_image(
+    image_path=image_path, 
+    seg_map=fused_class_map, 
+    mapping_keys=mapping_keys
+)
