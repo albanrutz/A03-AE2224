@@ -27,9 +27,6 @@ CATEGORY_COLOURS = {
     "Background Clutter": (0, 0, 0),
 }
 
-MERGE_CARS = True
-MERGE_VEGETATION = False
-
 # =============================================================================
 # EVALUATION CORE FUNCTIONS
 # =============================================================================
@@ -284,7 +281,7 @@ def save_segmentation_map(image_path, seg_map, mapping_keys):
     
     return save_path
 
-def save_and_evaluate_single_image(image_path, seg_map, mapping_keys):
+def save_and_evaluate_single_image(image_path, seg_map, mapping_keys, merge_cars=True, merge_vegetation=False):
     """
     The master importable function. 
     It saves the raw prediction array to disk as an RGB image, automatically locates
@@ -299,7 +296,7 @@ def save_and_evaluate_single_image(image_path, seg_map, mapping_keys):
     # 3. Setup the colour index logic based on global configuration
     validate_colour_map(CATEGORY_COLOURS)
     categories, colour_to_idx = build_colour_index(
-        CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION
+        CATEGORY_COLOURS, merge_cars=merge_cars, merge_vegetation=merge_vegetation
     )
     
     if not os.path.exists(gt_path):
