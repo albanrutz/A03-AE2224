@@ -183,9 +183,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 # =============================================================================
 
 clip_prompts = [
-    "aerial view of a building", "aerial view of a road", "aerial view of a tree",
-    "aerial view of low vegetation", "aerial view of background clutter", 
-    "aerial view of a car", "aerial view of a human"
+    "drone view photo of a building", "drone view photo of a road", "drone view photo of a tree",
+    "drone view photo of low vegetation", "drone view photo of background clutter", 
+    "drone view photo of a car", "drone view photo of a human"
 ]
 
 mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]

@@ -301,7 +301,7 @@ if __name__ == "__main__":
     miou_lst = []
     per_class_lst = []
     for image_path in image_paths:
-        prnt(f"\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"Processing: {os.path.basename(image_path)}")
         print(f"{'='*60}")
         
