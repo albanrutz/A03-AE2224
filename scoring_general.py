@@ -314,3 +314,37 @@ def save_and_evaluate_single_image(image_path, seg_map, mapping_keys, merge_cars
     print_results(per_class, miou, image_name=os.path.basename(pred_path))
     
     return per_class, miou
+
+def evaluate_single_image(image_path, merge_cars=True, merge_vegetation=False):
+    """
+    The master importable function. 
+    It saves the raw prediction array to disk as an RGB image, automatically locates
+    the corresponding ground-truth label, and executes the evaluation.
+    """
+    # 1. Save the mask
+    pred_path = image_path.replace("Images", "Predictions")
+    
+    # 2. Derive the Ground Truth path
+    gt_path = pred_path.replace("Predictions", "Labels")
+    
+    # 3. Setup the colour index logic based on global configuration
+    validate_colour_map(CATEGORY_COLOURS)
+    categories, colour_to_idx = build_colour_index(
+        CATEGORY_COLOURS, merge_cars=merge_cars, merge_vegetation=merge_vegetation
+    )
+    
+    if not os.path.exists(gt_path):
+        print(f"[-] Ground Truth not found at {gt_path}. Skipping evaluation.")
+        return None, None
+
+    print(f"[*] Ground Truth found. Running IoU Evaluation...")
+    if merge_cars:
+        print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
+    if merge_vegetation:
+        print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
+
+    # 4. Evaluate and print
+    per_class, miou, _ = evaluate_pair(gt_path, pred_path, colour_to_idx, categories)
+    print_results(per_class, miou, image_name=os.path.basename(pred_path))
+    
+    return per_class, miou

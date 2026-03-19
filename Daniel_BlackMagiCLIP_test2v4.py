@@ -19,6 +19,7 @@ import matplotlib.patches as mpatches
 from PIL import Image
 from tqdm import tqdm
 import os
+from scoring_general import save_and_evaluate_single_image
 
 # =============================================================================
 # --- 1. HARDWARE & CONTEXT INITIALIZATION ---
@@ -260,9 +261,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 if __name__ == "__main__":
     
     clip_prompts = [
-        "aerial view of a building", "aerial view of road", "aerial view of a tree",
-        "aerial view of low vegetation", "aerial view of background clutter", 
-        "aerial view of car", "aerial view of human"
+        "aerial photo of a building", "aerial photo of road", "aerial photo of a tree",
+        "aerial photo of low vegetation", "aerial photo of background clutter", 
+        "aerial photo of car", "aerial photo of human"
     ]
     
     mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
@@ -292,14 +293,15 @@ if __name__ == "__main__":
     fusion_temperature = 2.5 # Values > 1.0 soften the probability distribution
 
     # Define Image Directory
-    image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
+    image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     # Execute Pipeline
     sw_plot = True  # Set to False to skip visualization and process silently
-    
+    miou_lst = []
+    per_class_lst = []
     for image_path in image_paths:
-        print(f"\n{'='*60}")
+        prnt(f"\n{'='*60}")
         print(f"Processing: {os.path.basename(image_path)}")
         print(f"{'='*60}")
         
@@ -312,14 +314,13 @@ if __name__ == "__main__":
             sw_plot=sw_plot
         )
 
-        # Convert to RGB and flip to BGR for OpenCV
-        rgb_seg_map = segment_mask_to_rgb(fused_class_map, mapping_keys)
-        bgr_seg_map = cv2.cvtColor(rgb_seg_map, cv2.COLOR_RGB2BGR)
-
-        # Save Output
-        save_path = image_path.replace("Images", "Predictions")
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        cv2.imwrite(save_path, bgr_seg_map)
-        print(f"[+] Saved BlackMagiCLIP prediction to: {save_path}")
+        results, miou = save_and_evaluate_single_image(
+            image_path=image_path, 
+            seg_map=fused_class_map, 
+            mapping_keys=mapping_keys
+    )
+        miou_lst.append(miou)
+        per_class_lst.append(results)
         sw_plot = False  # Only plot the first image for demonstration
         #input("Press Enter to continue to the next image...")
+    print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")

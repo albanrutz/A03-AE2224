@@ -8,6 +8,8 @@ from PIL import Image
 from tqdm import tqdm
 import os
 from scoring_general import save_and_evaluate_single_image
+import time 
+import pandas as pd
 
 # --- 4070 CONTEXT INITIALIZATION ---
 if torch.cuda.is_available():
@@ -181,9 +183,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 # =============================================================================
 
 clip_prompts = [
-    "aerial view of a building", "aerial view of road", "aerial view of a tree",
+    "aerial view of a building", "aerial view of a road", "aerial view of a tree",
     "aerial view of low vegetation", "aerial view of background clutter", 
-    "aerial view of car", "aerial view of human"
+    "aerial view of a car", "aerial view of a human"
 ]
 
 mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
@@ -193,30 +195,33 @@ mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"
 
 scale_class_matrix = {
     448: { # Massive Context: Trust it for geography, forbid it from guessing objects.
-        "building": 1.0, "road": 1.3, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.0, "car": 0.0, "human": 0.0 
+        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
+        "clutter": 1.5, "car": 0.0, "human": 0.0 
     },
     224: { # Medium Context
-        "building": 1.0, "road": 1.3, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.0, "car": 0.0, "human": 0.0
+        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
+        "clutter": 1.5, "car": 0.0, "human": 0.0
     },
     112: { # Fine Context
-        "building": 1.0, "road": 1.2, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.0, "car": 0.2, "human": 0.0
+        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
+        "clutter": 1.5, "car": 0.15, "human": 0.0
     },
     56: { # Micro Context: Highly suppress geography to let small objects punch through.
         "building": 0.5, "road": 1.0, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 0.5, "car": 0.8, "human": 0.2,
+        "clutter": 1.2, "car": 0.8, "human": 0.5,
     },
 }
 
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
-
+miou_lst = []
+per_class_lst = []
+time_lst = []
 # Execute
-sw_plot = True  # Set to False to skip visualization and just save predictions
+sw_plot = False  # Set to False to skip visualization and just save predictions
 for image_path in image_paths:
+    start_time = time.time()
     fused_class_map, fused_conf_map = exact_multi_scale_ensemble_matrix(
         image_path, clip_prompts, mapping_keys, scale_class_matrix, sw_plot=sw_plot
     )
@@ -224,4 +229,37 @@ for image_path in image_paths:
     image_path=image_path, 
     seg_map=fused_class_map, 
     mapping_keys=mapping_keys
-)
+    )
+    miou_lst.append(miou)
+    per_class_lst.append(results)
+    time_lst.append(time.time() - start_time)
+
+print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
+
+
+# 1. Convert each run into its own DataFrame
+# This creates a list of matrices where columns are Categories and rows are Metrics
+dataframes = [pd.DataFrame(run) for run in per_class_lst]
+
+# 2. Average all the DataFrames directly 
+avg_df = sum(dataframes) / len(dataframes)
+
+# 3. Print the formatted output
+header = f"\n{'='*80}"
+header += f"\nImage: Average Results"
+header += f"\n{'='*80}"
+print(header)
+
+col_w = 20
+print(f"\n{'Category':<{col_w}} {'IoU':>8} {'F0.5':>8} {'F1':>8} {'F2':>8} "
+      f"{'Precision':>10} {'Recall':>8}")
+print("-" * 76)
+
+# Iterate over the AVERAGED dataframe, not the original list
+for name, m in avg_df.items():
+    print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
+          f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
+
+print("-" * 76)
+

@@ -17,7 +17,7 @@ from PIL import Image
 # =============================================================================
 # INPUT FILE PATHS — set these before running
 # =============================================================================
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Predictions"  
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Predictions"  
 
 
 # =============================================================================
@@ -278,7 +278,10 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
 # =============================================================================
 
 if __name__ == "__main__":
-    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]  
+    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))] 
+    num_categories = 8 - (1 if MERGE_CARS else 0) - (1 if MERGE_VEGETATION else 0)
+    per_class_running = np.zeros((num_categories, 10))
+    miou_running = 0
     for PRED_IMAGE_PATH in image_paths:
          GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")   # Path to the ground-truth label image
          categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION)
@@ -292,5 +295,21 @@ if __name__ == "__main__":
          per_class, miou, _ = evaluate_pair(
              GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
          )
+         per_class_list = []
+         for category in per_class.keys():
+             per_class_list.append([*per_class[category].values()])
+        #  print(per_class_list)#
+        #  print(per_class_running)
+         per_class_running += np.array(per_class_list)
+         miou_running += miou
          print_results(per_class, miou, image_name=os.path.basename(PRED_IMAGE_PATH))
          input("Press Enter to continue to the next image...")
+    
+    per_class_running /= len(image_paths)
+    miou_running /= len(image_paths)
+    per_class_overall = {}
+    for i, category in enumerate(per_class.keys()):
+        per_class_overall[category] = {}
+        for j, metric in enumerate(per_class[category].keys()):
+            per_class_overall[category][metric] = per_class_running[i][j]
+    print_results(per_class_overall, miou_running, image_name='Overall')
