@@ -304,9 +304,9 @@ def save_and_evaluate_single_image(image_path, seg_map, mapping_keys, merge_cars
         return None, None
 
     print(f"[*] Ground Truth found. Running IoU Evaluation...")
-    if MERGE_CARS:
+    if merge_cars:
         print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
-    if MERGE_VEGETATION:
+    if merge_vegetation:
         print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
 
     # 4. Evaluate and print
