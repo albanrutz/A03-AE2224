@@ -75,8 +75,8 @@ with torch.inference_mode():
         # Post-process the outputs to get the masks back to the original image size
         results = processor.post_process_instance_segmentation(
             outputs,
-            threshold=0.2,
-            mask_threshold=0.2,
+            threshold=0.3,
+            mask_threshold=0.3,
             target_sizes=inputs.get("original_sizes").tolist()
         )[0]
         
