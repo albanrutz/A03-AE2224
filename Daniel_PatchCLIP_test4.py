@@ -37,10 +37,10 @@ def segment_mask_to_rgb(global_seg_map, labels_order):
             color_matrix[i] = [255, 255, 255]
     return color_matrix[global_seg_map]
 
-def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, scale_class_matrix, sw_plot=True):
+def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, scale_class_matrix, scale_threshold_matrix=None, temperature=1.0, sw_plot=True):
     """
     Multi-Scale ensemble that applies a specific weight to each class at each scale,
-    with built-in Matplotlib visualization.
+    with a Hard Activation Gate to mathematically crush low-confidence hallucinations.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, preprocess = clip.load("ViT-B/32", device=device)
@@ -60,6 +60,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 
     # Extract the patch scales from the matrix keys and sort descending
     patch_scales = sorted(list(scale_class_matrix.keys()), reverse=True)
+    
+    if scale_threshold_matrix is None:
+        scale_threshold_matrix = {}
 
     # 2. Iterate through each Spatial Scale
     for p_size in patch_scales:
@@ -67,11 +70,16 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
         
         # Extract the specific class weights for THIS scale
         scale_weights_dict = scale_class_matrix[p_size]
-        
-        # Convert dictionary to a 1D NumPy array strictly aligned with mapping_keys
         current_weight_array = np.array(
             [scale_weights_dict.get(k, 1.0) for k in mapping_keys], 
             dtype=np.float32
+        )
+        
+        # Extract specific class hard-thresholds for THIS scale
+        scale_thresholds_dict = scale_threshold_matrix.get(p_size, {})
+        current_threshold_array = torch.tensor(
+            [scale_thresholds_dict.get(k, 0.0) for k in mapping_keys], 
+            device=device, dtype=torch.float32
         )
         
         pad_w = (p_size - (W_orig % p_size)) % p_size
@@ -109,11 +117,21 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
                     image_features = model.encode_image(chunk)
                     image_features = image_features / image_features.norm(dim=-1, keepdim=True)
                     
-                    logits = logit_scale * (image_features @ text_features.T)
+                    # Compute Raw Logits
+                    raw_logits = logit_scale * (image_features @ text_features.T)
                     
-                    # Compute raw Softmax probabilities
-                    probs = torch.softmax(logits, dim=-1).cpu().numpy()
-                    all_probs.extend(probs)
+                    # 1. RAW Probability (Strict confidence for evaluating thresholds)
+                    raw_probs = torch.softmax(raw_logits, dim=-1)
+                    
+                    # 2. SOFT Probability (If temperature is used, otherwise identical)
+                    logits = raw_logits / temperature
+                    probs = torch.softmax(logits, dim=-1)
+                    
+                    # --- THE HARD ACTIVATION GATE ---
+                    # Crushes the probability to 0.0 if it doesn't meet the specified minimum bound
+                    probs = torch.where(raw_probs < current_threshold_array, torch.zeros_like(probs), probs)
+                    
+                    all_probs.extend(probs.cpu().numpy())
 
         # Project probabilities into the padded tensor
         for (u, l, left, right), prob_dist in zip(boxes, all_probs):
@@ -136,24 +154,19 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
     # =========================================================================
     # 5. MATPLOTLIB VISUALIZATION BLOCK
     # =========================================================================
-    print("\nComposing Final Visual Map...")
-    
-    # Generate the RGB Array based on the winning classes
-    rgb_map_uint8 = segment_mask_to_rgb(fused_class_map, mapping_keys)
-    rgb_map_float = rgb_map_uint8.astype(np.float32) / 255.0
-    
-    # Build the RGBA Alpha-Blended overlay using the confidence map
-    rgba_map = np.dstack((rgb_map_float, fused_confidence_map))
-
-    original_cv = cv2.cvtColor(np.array(original_image), cv2.COLOR_RGB2BGR)
     if sw_plot:
+        print("\nComposing Final Visual Map...")
+        rgb_map_uint8 = segment_mask_to_rgb(fused_class_map, mapping_keys)
+        rgb_map_float = rgb_map_uint8.astype(np.float32) / 255.0
+        rgba_map = np.dstack((rgb_map_float, fused_confidence_map))
+
+        original_cv = cv2.cvtColor(np.array(original_image), cv2.COLOR_RGB2BGR)
         fig, ax = plt.subplots(1, 2, figsize=(18, 9))
         
         ax[0].imshow(cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB))
         ax[0].set_title(f"Original Image ({W_orig}x{H_orig})", fontsize=14)
         ax[0].axis('off')
 
-        # Layer the original image behind the translucent probability map
         ax[1].imshow(cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB))
         ax[1].imshow(rgba_map) 
         ax[1].set_title(f"Matrix-Weighted Soft Voting Fusion ({W_orig}x{H_orig})", fontsize=14)
@@ -183,9 +196,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 # =============================================================================
 
 clip_prompts = [
-    "drone view photo of a building", "drone view photo of a road", "drone view photo of a tree",
-    "drone view photo of low vegetation", "drone view photo of background clutter", 
-    "drone view photo of a car", "drone view photo of a human"
+    "drone view of a building", "drone view of a road", "drone view of a tree",
+    "drone view of low vegetation", "drone view of background clutter", 
+    "drone view of a car", "drone view of a human"
 ]
 
 mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
@@ -194,21 +207,42 @@ mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"
 # Format: { Patch_Size: { "class_key": weight_multiplier } }
 
 scale_class_matrix = {
-    448: { # Massive Context: Trust it for geography, forbid it from guessing objects.
-        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.5, "car": 0.0, "human": 0.0 
+    448: { 
+        "building": 0.8, "road": 0.8, "tree": 0.8, "low_veg": 0.8, 
+        "clutter": 0.8, "car": 0.0, "human": 0.0 
     },
-    224: { # Medium Context
-        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
+    224: { 
+        "building": 1.0, "road": 1.0, "tree": 1.0, "low_veg": 1.0, 
         "clutter": 1.5, "car": 0.0, "human": 0.0
     },
-    112: { # Fine Context
-        "building": 1.1, "road": 1.1, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.5, "car": 0.15, "human": 0.0
+    112: { 
+        "building": 1.2, "road": 1.2, "tree": 1.1, "low_veg": 1.1, 
+        "clutter": 1.7, "car": 1.4, "human": 0.0
     },
-    56: { # Micro Context: Highly suppress geography to let small objects punch through.
+    56: { 
         "building": 0.5, "road": 1.0, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.2, "car": 0.8, "human": 0.5,
+        "clutter": 1.2, "car": 1.6, "human": 5.0
+    },
+}
+
+# --- THE HARD ACTIVATION GATE MATRIX ---
+# Format: { Patch_Size: { "class_key": minimum_probability_0_to_1 } }
+scale_threshold_matrix = {
+    448: { 
+        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
+        "clutter": 0.0, "car": 0.0, "human": 0.0 
+    },
+    224: { 
+        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
+        "clutter": 0.0, "car": 0.0, "human": 0.0
+    },
+    112: { 
+        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
+        "clutter": 0.0, "car": 0.7, "human": 0.0
+    },
+    56: { 
+        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
+        "clutter": 0.0, "car": 0.7, "human": 0.85
     },
 }
 
@@ -218,48 +252,57 @@ image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.en
 miou_lst = []
 per_class_lst = []
 time_lst = []
+
 # Execute
 sw_plot = False  # Set to False to skip visualization and just save predictions
 for image_path in image_paths:
     start_time = time.time()
+    
+    # Pass the threshold matrix into the function
     fused_class_map, fused_conf_map = exact_multi_scale_ensemble_matrix(
-        image_path, clip_prompts, mapping_keys, scale_class_matrix, sw_plot=sw_plot
+        image_path, 
+        clip_prompts, 
+        mapping_keys, 
+        scale_class_matrix, 
+        scale_threshold_matrix=scale_threshold_matrix,
+        temperature=1.0, # Kept at 1.0 to preserve your exact original math
+        sw_plot=sw_plot
     )
+    
     results, miou = save_and_evaluate_single_image(
-    image_path=image_path, 
-    seg_map=fused_class_map, 
-    mapping_keys=mapping_keys
+        image_path=image_path, 
+        seg_map=fused_class_map, 
+        mapping_keys=mapping_keys
     )
-    miou_lst.append(miou)
-    per_class_lst.append(results)
+    
+    if results is not None:
+        miou_lst.append(miou)
+        per_class_lst.append(results)
     time_lst.append(time.time() - start_time)
 
-print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
-print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
+if miou_lst:
+    print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+    print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
 
+    # 1. Convert each run into its own DataFrame
+    dataframes = [pd.DataFrame(run) for run in per_class_lst]
 
-# 1. Convert each run into its own DataFrame
-# This creates a list of matrices where columns are Categories and rows are Metrics
-dataframes = [pd.DataFrame(run) for run in per_class_lst]
+    # 2. Average all the DataFrames directly 
+    avg_df = sum(dataframes) / len(dataframes)
 
-# 2. Average all the DataFrames directly 
-avg_df = sum(dataframes) / len(dataframes)
+    # 3. Print the formatted output
+    header = f"\n{'='*80}"
+    header += f"\nImage: Average Results"
+    header += f"\n{'='*80}"
+    print(header)
 
-# 3. Print the formatted output
-header = f"\n{'='*80}"
-header += f"\nImage: Average Results"
-header += f"\n{'='*80}"
-print(header)
+    col_w = 20
+    print(f"\n{'Category':<{col_w}} {'IoU':>8} {'F0.5':>8} {'F1':>8} {'F2':>8} "
+          f"{'Precision':>10} {'Recall':>8}")
+    print("-" * 76)
 
-col_w = 20
-print(f"\n{'Category':<{col_w}} {'IoU':>8} {'F0.5':>8} {'F1':>8} {'F2':>8} "
-      f"{'Precision':>10} {'Recall':>8}")
-print("-" * 76)
+    for name, m in avg_df.items():
+        print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
+              f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
 
-# Iterate over the AVERAGED dataframe, not the original list
-for name, m in avg_df.items():
-    print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
-          f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
-
-print("-" * 76)
-
+    print("-" * 76)

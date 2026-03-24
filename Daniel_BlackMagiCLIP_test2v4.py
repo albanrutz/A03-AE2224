@@ -6,7 +6,7 @@ It utilizes:
 1. SpatialLayerHooks for dense Grad-CAM feature extraction from hidden layers.
 2. Multi-Scale Patching with interpolation-free padding.
 3. A Scale-Class Weight Matrix to natively handle the "Thing vs. Stuff" spatial dichotomy.
-4. Temperature Softening to mathematically reduce hyper-confident fragmentation.
+4. Hard Activation Gates to crush hallucinations and drastically speed up backpropagation.
 """
 
 import torch
@@ -19,6 +19,8 @@ import matplotlib.patches as mpatches
 from PIL import Image
 from tqdm import tqdm
 import os
+import time
+import pandas as pd
 from scoring_general import save_and_evaluate_single_image
 
 # =============================================================================
@@ -80,7 +82,7 @@ def segment_mask_to_rgb(global_seg_map, labels_order):
 # --- 4. THE CORE ARCHITECTURE ---
 # =============================================================================
 
-def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, scale_class_matrix, temperature=1.0, sw_plot=True):
+def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, scale_class_matrix, scale_threshold_matrix=None, sw_plot=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     # CRITICAL: RN50 is required for the SpatialLayerHook (CNN Architecture)
@@ -102,8 +104,10 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
         text_features = model.encode_text(text_tokens).float()
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-    # Extract the patch scales from the matrix keys and sort descending
     patch_scales = sorted(list(scale_class_matrix.keys()), reverse=True)
+
+    if scale_threshold_matrix is None:
+        scale_threshold_matrix = {}
 
     for p_size in patch_scales:
         print(f"\n--- Processing Scale: {p_size}x{p_size} (Grad-CAM Enabled) ---")
@@ -115,7 +119,14 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
             dtype=np.float32
         )
         
-        # 2. Calculate necessary padding for interpolation-free extraction
+        # 2. Extract specific class hard-thresholds for THIS scale
+        scale_thresholds_dict = scale_threshold_matrix.get(p_size, {})
+        current_threshold_array = torch.tensor(
+            [scale_thresholds_dict.get(k, 0.0) for k in mapping_keys], 
+            device=device, dtype=torch.float32
+        )
+        
+        # 3. Calculate necessary padding for interpolation-free extraction
         pad_w = (p_size - (W_orig % p_size)) % p_size
         pad_h = (p_size - (H_orig % p_size)) % p_size
         padded_w, padded_h = W_orig + pad_w, H_orig + pad_h
@@ -139,11 +150,11 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 
         batch_tensor = torch.stack(patches).to(device)
         
-        # Batch size lowered to 32 to accommodate 7 backpropagation passes per patch
+        # Batch size lowered to 32 to accommodate backpropagation passes
         batch_size = 32 
         all_dense_probs = []
         
-        # 3. Inference & Batched Backpropagation
+        # 4. Inference & Batched Backpropagation
         for i in tqdm(range(0, len(batch_tensor), batch_size), desc=f"Evaluating Patches"):
             chunk = batch_tensor[i : i + batch_size].type(model.dtype)
             chunk.requires_grad = True # Mandatory for backprop
@@ -152,22 +163,29 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
             image_features = model.encode_image(chunk).float()
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             
-            # Algorithmic Fix: Temperature Softening applied here
-            raw_logits = model.logit_scale.exp().float() * (image_features @ text_features.T)
-            logits = raw_logits / temperature
-            probs = torch.softmax(logits, dim=-1) # Shape: (Batch, Num_Classes)
+            logits = model.logit_scale.exp().float() * (image_features @ text_features.T)
+            probs = torch.softmax(logits, dim=-1) # Raw Probability Distribution
+            
+            # --- THE HARD ACTIVATION GATE ---
+            # Crushes the probability to 0.0 if it doesn't meet the specified minimum bound
+            probs = torch.where(probs < current_threshold_array, torch.zeros_like(probs), probs)
             
             # Storage for the dense, pixel-level heatmaps for this batch
             batch_dense_cams = torch.zeros((chunk.shape[0], num_classes, p_size, p_size), device=device)
             
             # --- THE GRAD-CAM BACKWARD LOOP ---
-            for c_idx in range(num_classes):
+            active_classes = [
+                c_idx for c_idx, key in enumerate(mapping_keys)
+                if scale_weights_dict.get(key, 1.0) > 0.0
+]
+            for c_idx in active_classes:
+                if probs[:, c_idx].sum() == 0:
+                    continue
+                
                 model.zero_grad()
                 
                 # Score for this specific class across the whole batch
                 score = (image_features @ text_features[c_idx]) 
-                
-                # Sum the batch to allow simultaneous backward routing
                 score.sum().backward(retain_graph=True)
                 
                 if hook.gradients is not None:
@@ -183,7 +201,7 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
                     # Upsample using nearest neighbor to preserve strict boundaries
                     cam_up = F.interpolate(cam_norm, size=(p_size, p_size), mode='nearest')
                     
-                    # Modulate the spatial heatmap by the patch's overall softened probability
+                    # Modulate the spatial heatmap by the patch's overall probability
                     class_prob = probs[:, c_idx].view(-1, 1, 1, 1)
                     batch_dense_cams[:, c_idx, :, :] = (cam_up * class_prob).squeeze(1)
                 
@@ -191,17 +209,17 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
             all_dense_probs.extend(batch_dense_cams.permute(0, 2, 3, 1).detach().cpu().numpy())
             
             # Clear cache to prevent RTX 4070 OOM
-            del chunk, image_features, raw_logits, logits, probs, batch_dense_cams
+            del chunk, image_features, logits, probs, batch_dense_cams
             torch.cuda.empty_cache()
 
-        # 4. Native Block Projection
+        # 5. Native Block Projection
         for (u, l, left, right), dense_prob_block in zip(boxes, all_dense_probs):
             padded_scale_tensor[u:l, left:right, :] = dense_prob_block 
 
         # Slice off padding to get native dimensions
         local_scale_tensor = padded_scale_tensor[:H_orig, :W_orig, :]
 
-        # 5. Mathematical Fusion (Tensor Accumulation with Matrix Weights)
+        # 6. Mathematical Fusion (Tensor Accumulation with Matrix Weights)
         weighted_local_tensor = local_scale_tensor * current_weight_array
         fused_prob_tensor += weighted_local_tensor
 
@@ -217,14 +235,13 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
     # =========================================================================
     # --- VISUALIZATION BLOCK ---
     # =========================================================================
-    print("\nComposing Final Visual Map...")
-    rgb_map_uint8 = segment_mask_to_rgb(fused_class_map, mapping_keys)
-    rgb_map_float = rgb_map_uint8.astype(np.float32) / 255.0
-    rgba_map = np.dstack((rgb_map_float, fused_confidence_map))
-
-    original_cv = cv2.cvtColor(np.array(original_image), cv2.COLOR_RGB2BGR)
-    
     if sw_plot:
+        print("\nComposing Final Visual Map...")
+        rgb_map_uint8 = segment_mask_to_rgb(fused_class_map, mapping_keys)
+        rgb_map_float = rgb_map_uint8.astype(np.float32) / 255.0
+        rgba_map = np.dstack((rgb_map_float, fused_confidence_map))
+
+        original_cv = cv2.cvtColor(np.array(original_image), cv2.COLOR_RGB2BGR)
         fig, ax = plt.subplots(1, 2, figsize=(18, 9))
         ax[0].imshow(cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB))
         ax[0].set_title(f"Original Image ({W_orig}x{H_orig})", fontsize=14)
@@ -261,37 +278,45 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 if __name__ == "__main__":
     
     clip_prompts = [
-        "aerial photo of a building", "aerial photo of road", "aerial photo of a tree",
-        "aerial photo of low vegetation", "aerial photo of background clutter", 
-        "aerial photo of car", "aerial photo of human"
+    "drone view of a building", "drone view of a road", "drone view of a tree",
+    "drone view of low vegetation", "drone view of background clutter", 
+    "drone view of a car", "drone view of a human"
     ]
     
     mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
 
-    # --- THE SCALE-CLASS WEIGHT MATRIX ---
     scale_class_matrix = {
-        448: { 
-            "building": 1.2,
-            "road": 0.95,
-            "tree": 0.95,
-            "low_veg": 2.8,
-            "clutter": 1.5,
+        448: {
+            "building": 1.1,
+            "road": 1.5,
+            "tree": 1.2,
+            "low_veg": 3.5,
+            "clutter": 2.5,
             "car": 0.0,
             "human": 0.0
         },
-        224: { 
+        224: {
             "building": 1.0,
-            "road": 0.9,
-            "tree": 0.9,
-            "low_veg": 2.5,
-            "clutter": 1.5,
-            "car": 1.1,
-            "human": 0.8
+            "road": 1.3,
+            "tree": 1.1,
+            "low_veg": 3.0,
+            "clutter": 2.2,
+            "car": 0.25,        # DOWN from 0.3 — precision 0.21 is better but still low
+            "human": 0.9,       # UP from 0.6 — restore closer to baseline 0.8, then push higher
         },
     }
-    # Algorithm Hyperparameters
-    fusion_temperature = 2.5 # Values > 1.0 soften the probability distribution
 
+    scale_threshold_matrix = {
+        224: {
+            "building": 0.0,
+            "road": 0.0,
+            "tree": 0.0,
+            "low_veg": 0.0,
+            "clutter": 0.0,
+            "car": 0.82,        # Slight nudge up — precision still needs work
+            "human": 0.40,      # DOWN from 0.45 — open the gate wider to recover recall
+        }
+    }
     # Define Image Directory
     image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
@@ -300,17 +325,21 @@ if __name__ == "__main__":
     sw_plot = True  # Set to False to skip visualization and process silently
     miou_lst = []
     per_class_lst = []
+    time_lst = []
+    
     for image_path in image_paths:
         print(f"\n{'='*60}")
         print(f"Processing: {os.path.basename(image_path)}")
         print(f"{'='*60}")
+        
+        start_time = time.time()
         
         fused_class_map, fused_conf_map = exact_multi_scale_ensemble_matrix(
             image_path, 
             clip_prompts, 
             mapping_keys, 
             scale_class_matrix, 
-            temperature=fusion_temperature, # Injecting the parameter here
+            scale_threshold_matrix=scale_threshold_matrix,
             sw_plot=sw_plot
         )
 
@@ -318,9 +347,39 @@ if __name__ == "__main__":
             image_path=image_path, 
             seg_map=fused_class_map, 
             mapping_keys=mapping_keys
-    )
-        miou_lst.append(miou)
-        per_class_lst.append(results)
+        )
+        
+        if results is not None:
+            miou_lst.append(miou)
+            per_class_lst.append(results)
+            
+        time_lst.append(time.time() - start_time)
         sw_plot = False  # Only plot the first image for demonstration
-        #input("Press Enter to continue to the next image...")
-    print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+
+    # --- FINAL PANDAS REPORTING ---
+    if miou_lst:
+        print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+        print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
+
+        # 1. Convert each run into its own DataFrame
+        dataframes = [pd.DataFrame(run) for run in per_class_lst]
+
+        # 2. Average all the DataFrames directly 
+        avg_df = sum(dataframes) / len(dataframes)
+
+        # 3. Print the formatted output
+        header = f"\n{'='*80}"
+        header += f"\nImage: Average Results"
+        header += f"\n{'='*80}"
+        print(header)
+
+        col_w = 20
+        print(f"\n{'Category':<{col_w}} {'IoU':>8} {'F0.5':>8} {'F1':>8} {'F2':>8} "
+              f"{'Precision':>10} {'Recall':>8}")
+        print("-" * 76)
+
+        for name, m in avg_df.items():
+            print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
+                  f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
+
+        print("-" * 76)
