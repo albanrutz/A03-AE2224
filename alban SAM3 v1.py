@@ -1,4 +1,4 @@
-# v1 comparison to results
+# v1 comparison to results and scoring integration
 
 import torch
 import numpy as np
@@ -106,3 +106,35 @@ axes[1].axis("off")
 
 plt.tight_layout()
 plt.show()
+
+# =============================================================================
+# SCORING INTEGRATION
+# =============================================================================
+
+# Import evaluation functions from scoring_general.py
+import sys
+sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  # Adjust path if needed
+from scoring_general import (
+    CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
+)
+
+# Save the predicted overlay as a temporary RGB image for evaluation
+pred_path = "predicted_segmentation.png"
+Image.fromarray(overlay).save(pred_path)  # PIL expects RGB
+
+# Build color index (merge cars since your code uses the same color for car/van)
+categories, colour_to_idx = build_colour_index(
+    CATEGORY_COLOURS, merge_cars=True, merge_vegetation=False
+)
+
+# Evaluate the prediction against ground truth
+per_class, miou, _ = evaluate_pair(
+    labels_path, pred_path, colour_to_idx, categories
+)
+
+# Print the results
+print_results(per_class, miou, image_name="000000.png")
+
+# Optional: Clean up the temporary file
+import os
+os.remove(pred_path)
