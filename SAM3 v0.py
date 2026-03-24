@@ -1,0 +1,105 @@
+import torch
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+
+# --- magic bug fix by gemini ---
+# This intercepts the Hugging Face library and turns off the strict type 
+# checker that is crashing because of their 'initializer_range' typo.
+import huggingface_hub.dataclasses
+huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
+# ---- thank you mr clanker -----
+
+from PIL import Image
+from transformers import Sam3Model, Sam3Processor
+
+# 1. Setup
+image_path = r"C:\Users\x3non\Desktop\q3 project y2\000000.png"
+
+uavid_gt_colors = {
+    "building":                   [128, 0, 0],
+
+    "road":                       [128, 64, 128],
+
+    "tree":                       [0, 128, 0],
+    "tree canopy":                [0, 128, 0],
+
+    "grass":                      [128, 128, 0],
+
+    "general background clutter": [0, 0, 0],
+    "sidewalk":                   [0, 0, 0],
+
+    "person":                     [64, 64, 0],
+    "human":                      [64, 64, 0],
+    "pedestrian":                 [64, 64, 0],
+
+
+    "car":                        [192, 0, 192],
+    "van":                        [192, 0, 192]
+}
+
+# 2. Load Hugging Face Model
+print("Loading Hugging Face SAM3...")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# We load in bfloat16 to save VRAM and increase speed
+model = Sam3Model.from_pretrained("facebook/sam3", torch_dtype=torch.bfloat16).to(device)
+processor = Sam3Processor.from_pretrained("facebook/sam3")
+
+# 3. Load Image
+image_pil = Image.open(image_path).convert("RGB")
+image_cv2 = np.array(image_pil)
+overlay = np.zeros_like(image_cv2, dtype=np.uint8)
+
+print("Starting inference...")
+# 4. Inference Loop
+with torch.inference_mode():
+    for prompt_text, color in uavid_gt_colors.items():
+        print(f"Segmenting: {prompt_text}...")
+        
+        # Prepare inputs for the model
+        inputs = processor(images=image_pil, text=prompt_text, return_tensors="pt").to(device)
+        
+        # Convert pixel values to match the model's bfloat16 precision
+        inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+        
+        # Run forward pass
+        outputs = model(**inputs)
+        
+        # Post-process the outputs to get the masks back to the original image size
+        results = processor.post_process_instance_segmentation(
+            outputs,
+            threshold=0.2,
+            mask_threshold=0.3,
+            target_sizes=inputs.get("original_sizes").tolist()
+        )[0]
+        
+        # Apply the color if objects were found
+        masks = results["masks"]
+        if len(masks) > 0:
+            # Move to CPU, convert to numpy, and flatten multiple instances into a single mask
+            masks_data = masks.cpu().numpy()
+            combined_mask = np.any(masks_data, axis=0) 
+            
+            color_rgb = np.array(color, dtype=np.uint8)
+            overlay[combined_mask] = color_rgb
+
+# 5. Blend and Display
+print("Generating visualization...")
+alpha = 0.5
+colored_pixels = np.any(overlay != 0, axis=-1)
+
+blended_image = image_cv2.copy()
+blended_image[colored_pixels] = cv2.addWeighted(
+    image_cv2[colored_pixels], 1 - alpha, 
+    overlay[colored_pixels], alpha, 
+    0
+)
+
+# Show the results
+plt.figure(figsize=(12, 8))
+plt.imshow(blended_image)
+plt.title("Hugging Face SAM3: UAVid Text Segmentation")
+plt.axis("off")
+plt.tight_layout()
+plt.show()
