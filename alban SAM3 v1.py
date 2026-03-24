@@ -1,4 +1,4 @@
-# v1 adding scoring
+# v1 comparison to results
 
 import torch
 import numpy as np
@@ -51,7 +51,11 @@ processor = Sam3Processor.from_pretrained("facebook/sam3")
 # 3. Load Image
 image_pil = Image.open(image_path).convert("RGB")
 image_cv2 = np.array(image_pil)
+labels_path = r"C:\Users\x3non\Desktop\q3 project y2\000000labels.png"
+labels_pil = Image.open(labels_path).convert("RGB")
+labels_cv2 = np.array(labels_pil)
 overlay = np.zeros_like(image_cv2, dtype=np.uint8)
+
 
 print("Starting inference...")
 # 4. Inference Loop
@@ -72,7 +76,7 @@ with torch.inference_mode():
         results = processor.post_process_instance_segmentation(
             outputs,
             threshold=0.2,
-            mask_threshold=0.3,
+            mask_threshold=0.2,
             target_sizes=inputs.get("original_sizes").tolist()
         )[0]
         
@@ -86,22 +90,19 @@ with torch.inference_mode():
             color_rgb = np.array(color, dtype=np.uint8)
             overlay[combined_mask] = color_rgb
 
-# 5. Blend and Display
+# 5. Display Side-by-Side Comparison
 print("Generating visualization...")
-alpha = 0.5
-colored_pixels = np.any(overlay != 0, axis=-1)
+fig, axes = plt.subplots(1, 2, figsize=(24, 8))
 
-blended_image = image_cv2.copy()
-blended_image[colored_pixels] = cv2.addWeighted(
-    image_cv2[colored_pixels], 1 - alpha, 
-    overlay[colored_pixels], alpha, 
-    0
-)
+# SAM3 Segmentation
+axes[0].imshow(overlay)
+axes[0].set_title("SAM3 Segmentation")
+axes[0].axis("off")
 
-# Show the results
-plt.figure(figsize=(12, 8))
-plt.imshow(blended_image)
-plt.title("Hugging Face SAM3: UAVid Text Segmentation")
-plt.axis("off")
+# Ground truth labels
+axes[1].imshow(labels_cv2)
+axes[1].set_title("Ground Truth Labels")
+axes[1].axis("off")
+
 plt.tight_layout()
 plt.show()
