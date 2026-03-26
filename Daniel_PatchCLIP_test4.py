@@ -246,7 +246,8 @@ scale_threshold_matrix = {
     },
 }
 
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
+#image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
+image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
 image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
 miou_lst = []
