@@ -17,15 +17,18 @@ labels_path = r"C:\Users\x3non\Desktop\q3 project y2\000000labels.png"
 uavid_gt_colors = {
     "building":                   [128, 0, 0],
 
-    "asphalt road":               [128, 64, 128],
+    "paved road":                 [128, 64, 128],
 
     "tree":                       [0, 128, 0],
     "tree canopy":                [0, 128, 0],
 
     "grass":                      [128, 128, 0],
+    "bush":                       [128, 128, 0],
+    "low vegetation":             [128, 128, 0],
 
     "general background clutter": [0, 0, 0],
     "sidewalk":                   [0, 0, 0],
+    "public square":              [0, 0, 0],
 
     "person":                     [64, 64, 0],
     "human":                      [64, 64, 0],
@@ -145,7 +148,7 @@ from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair,
 pred_path = "predicted_segmentation.png"
 Image.fromarray(overlay).save(pred_path) 
 
-categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=True)
+categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=False)
 per_class, miou, _ = evaluate_pair(labels_path, pred_path, colour_to_idx, categories)
 
 print_results(per_class, miou, image_name="000000.png")
