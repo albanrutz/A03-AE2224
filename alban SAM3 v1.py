@@ -76,7 +76,7 @@ with torch.inference_mode():
         results = processor.post_process_instance_segmentation(
             outputs,
             threshold=0.3,
-            mask_threshold=0.3,
+            mask_threshold=0.6,
             target_sizes=inputs.get("original_sizes").tolist()
         )[0]
         
