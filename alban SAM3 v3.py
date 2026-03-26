@@ -3,7 +3,6 @@ import glob
 import torch
 import numpy as np
 import cv2
-import kagglehub
 from PIL import Image
 from transformers import Sam3Model, Sam3Processor
 
@@ -17,17 +16,11 @@ import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  
 from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
 
-# 1. Download and Locate Dataset
-print("Downloading/Locating UAVid dataset...")
-dataset_path = kagglehub.dataset_download("dasmehdixtr/uavid-v1")
-print(f"Dataset root: {dataset_path}")
+# 1. Locate Local Dataset
+print("Locating local UAVid dataset...")
+images_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\images"
+labels_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\labels"
 
-# Construct paths to seq16
-# Note: Some dataset versions capitalize 'Images' and 'Labels'
-images_dir = os.path.join(dataset_path, "uavid_val", "seq16", "Images")
-labels_dir = os.path.join(dataset_path, "uavid_val", "seq16", "Labels")
-
-# Get sorted lists of all images and labels to ensure they match up perfectly
 image_files = sorted(glob.glob(os.path.join(images_dir, "*.png")))
 label_files = sorted(glob.glob(os.path.join(labels_dir, "*.png")))
 
@@ -47,6 +40,7 @@ uavid_gt_colors = {
     "grass":                      [128, 128, 0],
     "bush":                       [128, 128, 0],
     "low vegetation":             [128, 128, 0],
+    "field":                      [128, 128, 0],
 
     "general background clutter": [0, 0, 0],
     "sidewalk":                   [0, 0, 0],
@@ -122,11 +116,9 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
                     target_sizes=inputs.get("original_sizes").tolist()
                 )[0]
                 
-                # FIXED: Cast to float32 before numpy conversion
                 masks = results["masks"].cpu().to(torch.float32).numpy()
                 
                 if len(masks) > 0:
-                    # FIXED: Cast to float32 before numpy conversion
                     scores = results.get("scores", torch.ones(len(masks))).cpu().to(torch.float32).numpy()
                     
                     weighted_masks = masks * scores[:, None, None]
@@ -154,4 +146,4 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
     os.remove(pred_path)
 
 print(f"\n=== BATCH COMPLETE ===")
-print(f"Average mIoU across all 70 images: {total_miou / len(image_files):.4f}")
+print(f"Average mIoU across all {len(image_files)} images: {total_miou / len(image_files):.4f}")
