@@ -290,8 +290,8 @@ if __name__ == "__main__":
             "building": 1.1,
             "road": 1.5,
             "tree": 1.2,
-            "low_veg": 3.5,
-            "clutter": 2.5,
+            "low_veg": 1.0,
+            "clutter": 1.0,
             "car": 0.0,
             "human": 0.0
         },
@@ -299,10 +299,10 @@ if __name__ == "__main__":
             "building": 1.0,
             "road": 1.3,
             "tree": 1.1,
-            "low_veg": 3.0,
-            "clutter": 2.2,
-            "car": 0.25,        # DOWN from 0.3 — precision 0.21 is better but still low
-            "human": 0.9,       # UP from 0.6 — restore closer to baseline 0.8, then push higher
+            "low_veg": 1.0,
+            "clutter": 1.0,
+            "car": 1.1,
+            "human": 1.0,
         },
     }
 
@@ -313,8 +313,8 @@ if __name__ == "__main__":
             "tree": 0.0,
             "low_veg": 0.0,
             "clutter": 0.0,
-            "car": 0.82,        # Slight nudge up — precision still needs work
-            "human": 0.40,      # DOWN from 0.45 — open the gate wider to recover recall
+            "car": 0.75,
+            "human": 0.7,
         }
     }
     # Define Image Directory
@@ -322,7 +322,7 @@ if __name__ == "__main__":
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     # Execute Pipeline
-    sw_plot = True  # Set to False to skip visualization and process silently
+    sw_plot =False  # Set to False to skip visualization and process silently
     miou_lst = []
     per_class_lst = []
     time_lst = []
@@ -354,7 +354,7 @@ if __name__ == "__main__":
             per_class_lst.append(results)
             
         time_lst.append(time.time() - start_time)
-        sw_plot = False  # Only plot the first image for demonstration
+        #sw_plot = False  # Only plot the first image for demonstration
 
     # --- FINAL PANDAS REPORTING ---
     if miou_lst:
