@@ -148,7 +148,7 @@ from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair,
 pred_path = "predicted_segmentation.png"
 Image.fromarray(overlay).save(pred_path) 
 
-categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=True)
+categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=False)
 per_class, miou, _ = evaluate_pair(labels_path, pred_path, colour_to_idx, categories)
 
 print_results(per_class, miou, image_name="000000.png")
