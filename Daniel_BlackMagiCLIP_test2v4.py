@@ -240,17 +240,35 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
         rgb_map_uint8 = segment_mask_to_rgb(fused_class_map, mapping_keys)
         rgb_map_float = rgb_map_uint8.astype(np.float32) / 255.0
         rgba_map = np.dstack((rgb_map_float, fused_confidence_map))
+        gt_path = image_path.replace("Images", "Labels")
+        gt_rgb = None
+        if os.path.exists(gt_path):
+            gt_rgb = np.array(Image.open(gt_path).convert("RGB"))
 
         original_cv = cv2.cvtColor(np.array(original_image), cv2.COLOR_RGB2BGR)
-        fig, ax = plt.subplots(1, 2, figsize=(18, 9))
-        ax[0].imshow(cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB))
-        ax[0].set_title(f"Original Image ({W_orig}x{H_orig})", fontsize=14)
-        ax[0].axis('off')
+        original_rgb = cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB)
+        fig, ax = plt.subplots(2, 2, figsize=(16, 14))
 
-        ax[1].imshow(cv2.cvtColor(original_cv, cv2.COLOR_BGR2RGB))
-        ax[1].imshow(rgba_map) 
-        ax[1].set_title(f"BlackMagiCLIP Dense Matrix Fusion ({W_orig}x{H_orig})", fontsize=14)
-        ax[1].axis('off')
+        ax[0, 0].imshow(original_rgb)
+        ax[0, 0].set_title(f"Original Image ({W_orig}x{H_orig})", fontsize=14)
+        ax[0, 0].axis('off')
+
+        ax[0, 1].imshow(original_rgb)
+        ax[0, 1].imshow(rgba_map)
+        ax[0, 1].set_title(f"BlackMagiCLIP Dense Matrix Fusion ({W_orig}x{H_orig})", fontsize=14)
+        ax[0, 1].axis('off')
+
+        ax[1, 0].imshow(rgb_map_uint8)
+        ax[1, 0].set_title("Prediction Mask (No Overlay)", fontsize=14)
+        ax[1, 0].axis('off')
+
+        if gt_rgb is not None:
+            ax[1, 1].imshow(gt_rgb)
+            ax[1, 1].set_title("Ground Truth Mask", fontsize=14)
+        else:
+            ax[1, 1].text(0.5, 0.5, "Ground Truth not found", ha='center', va='center', fontsize=12)
+            ax[1, 1].set_title("Ground Truth Mask", fontsize=14)
+        ax[1, 1].axis('off')
 
         uavid_gt_colors = {
             "building": [128, 0, 0], "road": [128, 64, 128], "tree": [0, 128, 0],
@@ -264,7 +282,7 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
             ) 
             for i in range(len(clip_prompts))
         ]
-        ax[1].legend(handles=patches_legend, bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax[0, 1].legend(handles=patches_legend, bbox_to_anchor=(1.05, 1), loc='upper left')
 
         plt.tight_layout()
         plt.show()
@@ -291,7 +309,7 @@ if __name__ == "__main__":
             "road": 1.5,
             "tree": 1.2,
             "low_veg": 1.0,
-            "clutter": 1.0,
+            "clutter": 1.2,
             "car": 0.0,
             "human": 0.0
         },
@@ -300,21 +318,30 @@ if __name__ == "__main__":
             "road": 1.3,
             "tree": 1.1,
             "low_veg": 1.0,
-            "clutter": 1.0,
-            "car": 1.1,
-            "human": 1.0,
+            "clutter": 1.2,
+            "car": 1.0,
+            "human": 1.2,
         },
     }
 
     scale_threshold_matrix = {
+        448: {
+                    "building": 0.0,
+                    "road": 0.0,
+                    "tree": 0.0,
+                    "low_veg": 0.0,
+                    "clutter": 0.0,
+                    "car": 0.0,
+                    "human": 0.0,
+            },
         224: {
-            "building": 0.0,
-            "road": 0.0,
-            "tree": 0.0,
-            "low_veg": 0.0,
-            "clutter": 0.0,
-            "car": 0.75,
-            "human": 0.7,
+            "building": 0.5,
+            "road": 0,
+            "tree": 0.5,
+            "low_veg": 0.4,
+            "clutter": 0.1,
+            "car": 0.85,
+            "human": 0.75,
         }
     }
     # Define Image Directory
@@ -322,7 +349,7 @@ if __name__ == "__main__":
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     # Execute Pipeline
-    sw_plot =False  # Set to False to skip visualization and process silently
+    sw_plot = False  # Set to False to skip visualization and process silently
     miou_lst = []
     per_class_lst = []
     time_lst = []
