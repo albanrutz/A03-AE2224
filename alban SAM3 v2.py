@@ -11,8 +11,8 @@ huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
 # ---- thank you mr clanker -----
 
 # 1. Setup & Configuration
-image_path = r"C:\Users\x3non\Desktop\q3 project y2\000000.png"
-labels_path = r"C:\Users\x3non\Desktop\q3 project y2\000000labels.png"
+image_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Images\file23-1.png"
+labels_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Labels\file23-1.png"
 
 uavid_gt_colors = {
     "building":                   [128, 0, 0],
@@ -151,7 +151,7 @@ Image.fromarray(overlay).save(pred_path)
 categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=False)
 per_class, miou, _ = evaluate_pair(labels_path, pred_path, colour_to_idx, categories)
 
-print_results(per_class, miou, image_name="000000.png")
+print_results(per_class, miou, image_name="res.png")
 
 import os
 os.remove(pred_path)
