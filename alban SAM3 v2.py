@@ -11,11 +11,13 @@ huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
 # ---- thank you mr clanker -----
 
 # 1. Setup & Configuration
-image_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Images\file23-1.png"
-labels_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Labels\file23-1.png"
+image_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Images\000000.png"
+labels_path = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\Labels\000000.png"
 
 uavid_gt_colors = {
     "building":                   [128, 0, 0],
+    "house":                      [128, 0, 0],
+    "tiled roof":                 [128, 0, 0],
 
     "paved road":                 [128, 64, 128],
 

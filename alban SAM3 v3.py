@@ -18,8 +18,8 @@ from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair,
 
 # 1. Locate Local Dataset
 print("Locating local UAVid dataset...")
-images_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\images"
-labels_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid\uavid_val\seq16\labels"
+images_dir = r"C:\Users\x3non\Desktop\q3 project y2\seq67\Images"
+labels_dir = r"C:\Users\x3non\Desktop\q3 project y2\seq67\Labels"
 
 image_files = sorted(glob.glob(os.path.join(images_dir, "*.png")))
 label_files = sorted(glob.glob(os.path.join(labels_dir, "*.png")))
@@ -31,6 +31,8 @@ print(f"Found {len(image_files)} image-label pairs. Initializing models...")
 
 uavid_gt_colors = {
     "building":                   [128, 0, 0],
+    "house":                      [128, 0, 0],
+    "tiled roof":                 [128, 0, 0],
 
     "paved road":                 [128, 64, 128],
 
