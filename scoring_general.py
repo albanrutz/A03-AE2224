@@ -1,8 +1,8 @@
 """
 UAVid Semantic Segmentation Evaluation Script
 ==============================================
-Computes per-class IoU, mIoU, and F0.5 / F1 / F2 scores by comparing
-a model output image against a UAVid ground-truth label image.
+Computes per-class IoU, mIoU, weighted mIoU, and F0.5 / F1 / F2 scores by
+comparing a model output image against a UAVid ground-truth label image.
 
 Both images must use the UAVid colour-mask format (RGB PNG).
 """
@@ -55,7 +55,7 @@ def build_colour_index(colour_map, merge_cars=False, merge_vegetation=False):
         merged_categories = []
         seen_car = False
         seen_veg = False
-        
+
         # Build the collapsed category list
         for name in colour_map:
             if merge_cars and name in ("Static Car", "Moving Car"):
@@ -181,29 +181,51 @@ def per_class_metrics(confusion, categories):
     return results
 
 def compute_miou(per_class_results):
-    """Mean IoU across all classes."""
+    """Mean IoU across all classes (unweighted)."""
     iou_values = [v["IoU"] for v in per_class_results.values()]
     return np.mean(iou_values)
 
-def print_results(per_class_results, miou, image_name=None):
+def compute_weighted_miou(per_class_results):
+    """
+    Weighted mean IoU where each class is weighted by its share of total
+    ground-truth pixels (TP + FN = GT pixel count for that class).
+    Classes with zero GT pixels contribute zero weight and are effectively
+    excluded from the average.
+    """
+    gt_counts  = np.array([v["TP"] + v["FN"] for v in per_class_results.values()], dtype=np.float64)
+    iou_values = np.array([v["IoU"]           for v in per_class_results.values()], dtype=np.float64)
+
+    total_gt = gt_counts.sum()
+    if total_gt == 0:
+        return 0.0
+
+    weights = gt_counts / total_gt
+    return float(np.dot(weights, iou_values))
+
+def print_results(per_class_results, miou, weighted_miou=None, image_name=None):
     """Pretty-print the evaluation results."""
-    header = f"\n{'='*80}"
+    header = f"\n{'='*84}"
     if image_name:
         header += f"\nImage: {image_name}"
-    header += f"\n{'='*80}"
+    header += f"\n{'='*84}"
     print(header)
 
     col_w = 20
     print(f"\n{'Category':<{col_w}} {'IoU':>8} {'F0.5':>8} {'F1':>8} {'F2':>8} "
-          f"{'Precision':>10} {'Recall':>8}")
-    print("-" * 76)
+          f"{'Precision':>10} {'Recall':>8} {'GT%':>7}")
+    print("-" * 84)
 
+    total_gt = sum(v["TP"] + v["FN"] for v in per_class_results.values())
     for name, m in per_class_results.items():
+        gt_pct = 100.0 * (m["TP"] + m["FN"]) / total_gt if total_gt > 0 else 0.0
         print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
-              f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
+              f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f} {gt_pct:>6.2f}%")
 
-    print("-" * 76)
-    print(f"\nmIoU: {miou:.4f}  ({miou*100:.2f}%)\n")
+    print("-" * 84)
+    print(f"\nmIoU:          {miou:.4f}  ({miou*100:.2f}%)")
+    if weighted_miou is not None:
+        print(f"Weighted mIoU: {weighted_miou:.4f}  ({weighted_miou*100:.2f}%)")
+    print()
 
 def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
     """Evaluate a single ground-truth / prediction image pair."""
@@ -218,28 +240,33 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
             f"prediction is {pred_label.shape}."
         )
 
-    confusion = compute_confusion_matrix(gt_label, pred_label, num_classes)
-    per_class = per_class_metrics(confusion, categories)
-    miou      = compute_miou(per_class)
+    confusion     = compute_confusion_matrix(gt_label, pred_label, num_classes)
+    per_class     = per_class_metrics(confusion, categories)
+    miou          = compute_miou(per_class)
+    weighted_miou = compute_weighted_miou(per_class)
 
-    return per_class, miou, confusion
+    return per_class, miou, weighted_miou, confusion
 
 def evaluate_all_images(image_dir, colour_to_idx, categories):
     """Loop through an entire directory of predicted images and evaluate them."""
-    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]  
-    
-    for PRED_IMAGE_PATH in image_paths:
-         GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")   
-         
-         if not os.path.exists(GT_IMAGE_PATH):
-             print(f"[-] Ground Truth not found for {os.path.basename(PRED_IMAGE_PATH)}. Skipping.")
-             continue
+    image_paths = [
+        os.path.join(image_dir, f)
+        for f in os.listdir(image_dir)
+        if f.endswith(('.png', '.jpg', '.jpeg'))
+    ]
 
-         per_class, miou, _ = evaluate_pair(
-             GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
-         )
-         print_results(per_class, miou, image_name=os.path.basename(PRED_IMAGE_PATH))
-         input("Press Enter to continue to the next image...")
+    for PRED_IMAGE_PATH in image_paths:
+        GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")
+
+        if not os.path.exists(GT_IMAGE_PATH):
+            print(f"[-] Ground Truth not found for {os.path.basename(PRED_IMAGE_PATH)}. Skipping.")
+            continue
+
+        per_class, miou, weighted_miou, _ = evaluate_pair(
+            GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
+        )
+        print_results(per_class, miou, weighted_miou, image_name=os.path.basename(PRED_IMAGE_PATH))
+        input("Press Enter to continue to the next image...")
 
 
 # =============================================================================
@@ -273,35 +300,35 @@ def save_segmentation_map(image_path, seg_map, mapping_keys):
     """
     rgb_seg_map = segment_mask_to_rgb(seg_map, mapping_keys)
     bgr_seg_map = cv2.cvtColor(rgb_seg_map, cv2.COLOR_RGB2BGR)
-    
+
     save_path = image_path.replace("Images", "Predictions")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     cv2.imwrite(save_path, bgr_seg_map)
     print(f"[+] Saved prediction to: {save_path}")
-    
+
     return save_path
 
 def save_and_evaluate_single_image(image_path, seg_map, mapping_keys, merge_cars=True, merge_vegetation=False):
     """
-    The master importable function. 
+    The master importable function.
     It saves the raw prediction array to disk as an RGB image, automatically locates
     the corresponding ground-truth label, and executes the evaluation.
     """
     # 1. Save the mask
     pred_path = save_segmentation_map(image_path, seg_map, mapping_keys)
-    
+
     # 2. Derive the Ground Truth path
     gt_path = pred_path.replace("Predictions", "Labels")
-    
+
     # 3. Setup the colour index logic based on global configuration
     validate_colour_map(CATEGORY_COLOURS)
     categories, colour_to_idx = build_colour_index(
         CATEGORY_COLOURS, merge_cars=merge_cars, merge_vegetation=merge_vegetation
     )
-    
+
     if not os.path.exists(gt_path):
         print(f"[-] Ground Truth not found at {gt_path}. Skipping evaluation.")
-        return None, None
+        return None, None, None
 
     print(f"[*] Ground Truth found. Running IoU Evaluation...")
     if merge_cars:
@@ -310,32 +337,30 @@ def save_and_evaluate_single_image(image_path, seg_map, mapping_keys, merge_cars
         print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
 
     # 4. Evaluate and print
-    per_class, miou, _ = evaluate_pair(gt_path, pred_path, colour_to_idx, categories)
-    print_results(per_class, miou, image_name=os.path.basename(pred_path))
-    
-    return per_class, miou
+    per_class, miou, weighted_miou, _ = evaluate_pair(gt_path, pred_path, colour_to_idx, categories)
+    print_results(per_class, miou, weighted_miou, image_name=os.path.basename(pred_path))
+
+    return per_class, miou, weighted_miou
 
 def evaluate_single_image(image_path, merge_cars=True, merge_vegetation=False):
     """
-    The master importable function. 
+    The master importable function.
     It saves the raw prediction array to disk as an RGB image, automatically locates
     the corresponding ground-truth label, and executes the evaluation.
     """
-    # 1. Save the mask
+    # 1. Derive paths
     pred_path = image_path.replace("Images", "Predictions")
-    
-    # 2. Derive the Ground Truth path
-    gt_path = pred_path.replace("Predictions", "Labels")
-    
-    # 3. Setup the colour index logic based on global configuration
+    gt_path   = pred_path.replace("Predictions", "Labels")
+
+    # 2. Setup the colour index logic based on global configuration
     validate_colour_map(CATEGORY_COLOURS)
     categories, colour_to_idx = build_colour_index(
         CATEGORY_COLOURS, merge_cars=merge_cars, merge_vegetation=merge_vegetation
     )
-    
+
     if not os.path.exists(gt_path):
         print(f"[-] Ground Truth not found at {gt_path}. Skipping evaluation.")
-        return None, None
+        return None, None, None
 
     print(f"[*] Ground Truth found. Running IoU Evaluation...")
     if merge_cars:
@@ -343,8 +368,8 @@ def evaluate_single_image(image_path, merge_cars=True, merge_vegetation=False):
     if merge_vegetation:
         print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
 
-    # 4. Evaluate and print
-    per_class, miou, _ = evaluate_pair(gt_path, pred_path, colour_to_idx, categories)
-    print_results(per_class, miou, image_name=os.path.basename(pred_path))
-    
-    return per_class, miou
+    # 3. Evaluate and print
+    per_class, miou, weighted_miou, _ = evaluate_pair(gt_path, pred_path, colour_to_idx, categories)
+    print_results(per_class, miou, weighted_miou, image_name=os.path.basename(pred_path))
+
+    return per_class, miou, weighted_miou

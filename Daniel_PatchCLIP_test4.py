@@ -196,9 +196,9 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 # =============================================================================
 
 clip_prompts = [
-    "drone view of a building", "drone view of a road", "drone view of a tree",
-    "drone view of low vegetation", "drone view of background clutter", 
-    "drone view of a car", "drone view of a human"
+    "drone photo of a building", "drone photo of a road", "drone photo of a tree",
+    "drone photo of low vegetation", "drone photo of background clutter", 
+    "drone photo of a car", "drone photo of a human"
 ]
 
 mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
@@ -245,56 +245,60 @@ scale_threshold_matrix = {
         "clutter": 0.0, "car": 0.7, "human": 0.85
     },
 }
+test_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images"
+cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
+sw_plot = False  # Set to False to skip visualization and just save predictions
+image_dir = cv_dir
 #image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
 image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
 miou_lst = []
+weighted_miou_lst = []
 per_class_lst = []
 time_lst = []
 
 # Execute
-sw_plot = False  # Set to False to skip visualization and just save predictions
+
 for image_path in image_paths:
     start_time = time.time()
-    
-    # Pass the threshold matrix into the function
+
     fused_class_map, fused_conf_map = exact_multi_scale_ensemble_matrix(
-        image_path, 
-        clip_prompts, 
-        mapping_keys, 
-        scale_class_matrix, 
+        image_path,
+        clip_prompts,
+        mapping_keys,
+        scale_class_matrix,
         scale_threshold_matrix=scale_threshold_matrix,
-        temperature=1.0, # Kept at 1.0 to preserve your exact original math
+        temperature=1.0,
         sw_plot=sw_plot
     )
-    
-    results, miou = save_and_evaluate_single_image(
-        image_path=image_path, 
-        seg_map=fused_class_map, 
+
+    results, miou, weighted_miou = save_and_evaluate_single_image(
+        image_path=image_path,
+        seg_map=fused_class_map,
         mapping_keys=mapping_keys
     )
-    
+
     if results is not None:
         miou_lst.append(miou)
+        weighted_miou_lst.append(weighted_miou)
         per_class_lst.append(results)
     time_lst.append(time.time() - start_time)
 
 if miou_lst:
     print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+    print(f"=== FINAL AVERAGE Weighted mIoU across {len(weighted_miou_lst)} images: {np.mean(weighted_miou_lst):.4f} ===")
     print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
 
-    # 1. Convert each run into its own DataFrame
-    dataframes = [pd.DataFrame(run) for run in per_class_lst]
-
-    # 2. Average all the DataFrames directly 
+    # per_class_lst is a list of {class_name: {metric: value}} dicts.
+    # Convert each to a DataFrame with classes as rows, metrics as columns,
+    # then average across images.
+    dataframes = [pd.DataFrame(run).T for run in per_class_lst]  # .T → rows=classes, cols=metrics
     avg_df = sum(dataframes) / len(dataframes)
 
-    # 3. Print the formatted output
-    header = f"\n{'='*80}"
+    header = f"\n{'='*84}"
     header += f"\nImage: Average Results"
-    header += f"\n{'='*80}"
+    header += f"\n{'='*84}"
     print(header)
 
     col_w = 20
@@ -302,8 +306,12 @@ if miou_lst:
           f"{'Precision':>10} {'Recall':>8}")
     print("-" * 76)
 
-    for name, m in avg_df.items():
+    for name, m in avg_df.iterrows():  # iterrows() since rows=classes now
         print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
               f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
 
     print("-" * 76)
+    avg_miou = avg_df['IoU'].mean()
+    avg_weighted_miou = np.mean(weighted_miou_lst)
+    print(f"\nmIoU:          {avg_miou:.4f}  ({avg_miou*100:.2f}%)")
+    print(f"Weighted mIoU: {avg_weighted_miou:.4f}  ({avg_weighted_miou*100:.2f}%)\n")
