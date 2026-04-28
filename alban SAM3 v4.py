@@ -30,19 +30,13 @@ if not image_files or len(image_files) != len(label_files):
 print(f"Found {len(image_files)} image-label pairs. Initializing models...")
 
 uavid_gt_colors = {
-    "building": [128, 0, 0],
-
-    "road": [128, 64, 128],
-
-    "tree": [0, 128, 0],
-
-    "low vegetation":[128, 128, 0],
-
-    "background clutter":[0, 0, 0],
-
-    "human": [64, 64, 0],
-
-    "car": [192, 0, 192]
+    "building":            [128, 0, 0],
+    "road":                [128, 64, 128],
+    "tree":                [0, 128, 0],
+    "low vegetation":      [128, 128, 0],
+    "background clutter":  [0, 0, 0],
+    "human":               [64, 64, 0],
+    "car":                 [192, 0, 192]
 }
 
 class_names = list(uavid_gt_colors.keys())
@@ -102,8 +96,8 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
                 
                 results = processor.post_process_instance_segmentation(
                     outputs,
-                    threshold=0.5,
-                    mask_threshold=0.5,
+                    threshold=0.4,
+                    mask_threshold=0.4,
                     target_sizes=inputs.get("original_sizes").tolist()
                 )[0]
                 
