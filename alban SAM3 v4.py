@@ -68,8 +68,8 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
     global_scores = np.zeros((num_classes, H, W), dtype=np.float32)
 
     # Tiling Setup
-    tile_size = 1024
-    stride = 512  
+    tile_size = 16384 #1024
+    stride = 512      #512
     
     def get_tiles(width, height, tile_size, stride):
         tiles = []
