@@ -30,30 +30,19 @@ if not image_files or len(image_files) != len(label_files):
 print(f"Found {len(image_files)} image-label pairs. Initializing models...")
 
 uavid_gt_colors = {
-    "building":                   [128, 0, 0],
-    "house":                      [128, 0, 0],
-    "tiled roof":                 [128, 0, 0],
+    "building": [128, 0, 0],
 
-    "paved road":                 [128, 64, 128],
+    "road": [128, 64, 128],
 
-    "tree":                       [0, 128, 0],
-    "tree canopy":                [0, 128, 0],
+    "tree": [0, 128, 0],
 
-    "grass":                      [128, 128, 0],
-    "bush":                       [128, 128, 0],
-    "low vegetation":             [128, 128, 0],
-    "field":                      [128, 128, 0],
+    "low vegetation":[128, 128, 0],
 
-    "general background clutter": [0, 0, 0],
-    "sidewalk":                   [0, 0, 0],
-    "public square":              [0, 0, 0],
+    "background clutter":[0, 0, 0],
 
-    "person":                     [64, 64, 0],
-    "human":                      [64, 64, 0],
-    "pedestrian":                 [64, 64, 0],
+    "human": [64, 64, 0],
 
-    "car":                        [192, 0, 192],
-    "van":                        [192, 0, 192]
+    "car": [192, 0, 192]
 }
 
 class_names = list(uavid_gt_colors.keys())
