@@ -5,6 +5,8 @@ import numpy as np
 import cv2
 from PIL import Image
 from transformers import Sam3Model, Sam3Processor
+import time  # Add this import
+from datetime import timedelta
 
 # --- magic bug fix by gemini ---
 import huggingface_hub.dataclasses
@@ -15,6 +17,9 @@ huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
 import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  
 from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
+
+# Start overall timer
+start_time_total = time.time()
 
 # 1. Locate Local Dataset
 print("Locating local UAVid dataset...")
@@ -44,18 +49,24 @@ num_classes = len(class_names)
 color_array = np.array(list(uavid_gt_colors.values()), dtype=np.uint8)
 
 # 2. Load Hugging Face Model
+model_load_start = time.time()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = Sam3Model.from_pretrained("facebook/sam3", torch_dtype=torch.bfloat16).to(device)
 processor = Sam3Processor.from_pretrained("facebook/sam3")
+model_load_time = time.time() - model_load_start
+print(f"Model loaded in {model_load_time:.2f}s")
 
 # Build color index once for scoring
 categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=True, merge_vegetation=False)
 
-# Track overall mIoU
+# Track overall mIoU and timing
 total_miou = 0.0
+image_times = []
 
 # 3. Batch Inference Loop
 for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
+    img_start_time = time.time()  # Start timer for this image
+    
     img_name = os.path.basename(img_path)
     print(f"\n[{img_idx + 1}/{len(image_files)}] Processing {img_name}...")
 
@@ -83,7 +94,10 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
         return list(set(tiles))
 
     tiles = get_tiles(W, H, tile_size, stride)
-
+    print(f"  Processing {len(tiles)} tiles...")
+    
+    inference_start = time.time()  # Time the inference phase
+    
     with torch.inference_mode():
         for tile_idx, (x1, y1, x2, y2) in enumerate(tiles):
             tile_pil = image_pil.crop((x1, y1, x2, y2))
@@ -113,6 +127,9 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
                         global_scores[class_idx, y1:y2, x1:x2], 
                         best_tile_scores
                     )
+    
+    inference_time = time.time() - inference_start
+    print(f"  Inference time: {inference_time:.2f}s")
 
     # Resolve overlaps for this image
     overlay = np.zeros_like(image_cv2, dtype=np.uint8)
@@ -129,6 +146,29 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
 
     total_miou += miou
     os.remove(pred_path)
+    
+    # Calculate and store image processing time
+    img_time = time.time() - img_start_time
+    image_times.append(img_time)
+    print(f"  Total time for {img_name}: {img_time:.2f}s")
+    
+    # Estimate remaining time
+    avg_time_per_image = sum(image_times) / len(image_times)
+    remaining_images = len(image_files) - (img_idx + 1)
+    estimated_remaining = avg_time_per_image * remaining_images
+    print(f"  Estimated time remaining: {timedelta(seconds=int(estimated_remaining))}")
 
-print(f"\n=== BATCH COMPLETE ===")
+# Calculate total time
+total_time = time.time() - start_time_total
+
+print(f"\n{'='*50}")
+print(f"=== BATCH COMPLETE ===")
+print(f"{'='*50}")
 print(f"Average mIoU across all {len(image_files)} images: {total_miou / len(image_files):.4f}")
+print(f"\nTiming Summary:")
+print(f"  Model loading: {model_load_time:.2f}s")
+print(f"  Total processing: {total_time:.2f}s ({timedelta(seconds=int(total_time))})")
+print(f"  Average per image: {sum(image_times) / len(image_times):.2f}s")
+print(f"  Fastest image: {min(image_times):.2f}s")
+print(f"  Slowest image: {max(image_times):.2f}s")
+print(f"{'='*50}")
