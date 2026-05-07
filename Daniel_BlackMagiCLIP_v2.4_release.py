@@ -303,7 +303,7 @@ if __name__ == "__main__":
     
     mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
 
-    scale_class_matrix = {
+    """scale_class_matrix = {
         448: {
             "building": 1.1,
             "road": 1.5,
@@ -343,14 +343,88 @@ if __name__ == "__main__":
             "car": 0.85,
             "human": 0.75,
         }
+    }"""
+
+    #Long label optimized weights 
+    scale_class_matrix = {
+        448: {
+            "building": 0.9810,
+            "road": 0.6498,
+            "tree": 0.7276,
+            "low_veg": 0.3784,
+            "clutter": 1.4474,
+            "car": 0.0000,
+            "human": 0.0000,
+        },
+        224: {
+            "building": 2.8208,
+            "road": 0.5397,
+            "tree": 3.2826,
+            "low_veg": 3.0060,
+            "clutter": 0.7609,
+            "car": 2.6541,
+            "human": 0.4433,
+        },
     }
+    scale_threshold_matrix = {
+        224: {
+            "building": 0.2660,
+            "road": 0.0000,
+            "tree": 0.2510,
+            "low_veg": 0.3964,
+            "clutter": 0.1756,
+            "car": 0.8893,
+            "human": 0.6498,
+        },
+    }
+    #short label optimized weights
+        
+    scale_class_matrix = {
+        448: {
+            "building": 2.4467,
+            "road": 0.6056,
+            "tree": 0.5274,
+            "low_veg": 0.4086,
+            "clutter": 0.6043,
+            "car": 0.0000,
+            "human": 0.0000,
+        },
+        224: {
+            "building": 2.6240,
+            "road": 0.5052,
+            "tree": 2.9124,
+            "low_veg": 3.0818,
+            "clutter": 4.1069,
+            "car": 3.8081,
+            "human": 2.7756,
+        },
+    }
+    scale_threshold_matrix = {
+        224: {
+            "building": 0.2714,
+            "road": 0.0000,
+            "tree": 0.2719,
+            "low_veg": 0.5298,
+            "clutter": 0.0925,
+            "car": 0.8959,
+            "human": 0.5747,
+        },
+    }
+
+
     # Define Image Directory
-    image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
+    test1_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1longpromptMagiCLIP\Images"
+    test2_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1shortpromptMagiCLIP\Images"
+    cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
+
+
+    image_dir = cv_dir
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     # Execute Pipeline
-    sw_plot = False  # Set to False to skip visualization and process silently
+    sw_plot = True  # Set to False to skip visualization and process silently
     miou_lst = []
+    weighted_miou_lst = []
     per_class_lst = []
     time_lst = []
     
@@ -370,7 +444,7 @@ if __name__ == "__main__":
             sw_plot=sw_plot
         )
 
-        results, miou = save_and_evaluate_single_image(
+        results, miou, weighted_miou = save_and_evaluate_single_image(
             image_path=image_path, 
             seg_map=fused_class_map, 
             mapping_keys=mapping_keys
@@ -378,26 +452,24 @@ if __name__ == "__main__":
         
         if results is not None:
             miou_lst.append(miou)
+            weighted_miou_lst.append(weighted_miou)
             per_class_lst.append(results)
             
         time_lst.append(time.time() - start_time)
-        #sw_plot = False  # Only plot the first image for demonstration
 
     # --- FINAL PANDAS REPORTING ---
     if miou_lst:
         print(f"\n=== FINAL AVERAGE mIoU across {len(miou_lst)} images: {np.mean(miou_lst):.4f} ===")
+        print(f"=== FINAL AVERAGE Weighted mIoU across {len(weighted_miou_lst)} images: {np.mean(weighted_miou_lst):.4f} ===")
         print(f"=== FINAL AVERAGE Inference Time across {len(time_lst)} images: {np.mean(time_lst):.4f} seconds ===")
 
-        # 1. Convert each run into its own DataFrame
-        dataframes = [pd.DataFrame(run) for run in per_class_lst]
-
-        # 2. Average all the DataFrames directly 
+        # .T so rows=classes, cols=metrics — consistent with PatchCLIP
+        dataframes = [pd.DataFrame(run).T for run in per_class_lst]
         avg_df = sum(dataframes) / len(dataframes)
 
-        # 3. Print the formatted output
-        header = f"\n{'='*80}"
+        header = f"\n{'='*84}"
         header += f"\nImage: Average Results"
-        header += f"\n{'='*80}"
+        header += f"\n{'='*84}"
         print(header)
 
         col_w = 20
@@ -405,8 +477,12 @@ if __name__ == "__main__":
               f"{'Precision':>10} {'Recall':>8}")
         print("-" * 76)
 
-        for name, m in avg_df.items():
+        for name, m in avg_df.iterrows():  # iterrows() since rows=classes now
             print(f"{name:<{col_w}} {m['IoU']:>8.4f} {m['F0.5']:>8.4f} {m['F1']:>8.4f} "
                   f"{m['F2']:>8.4f} {m['Precision']:>10.4f} {m['Recall']:>8.4f}")
 
         print("-" * 76)
+        avg_miou = avg_df['IoU'].mean()
+        avg_weighted_miou = np.mean(weighted_miou_lst)
+        print(f"\nmIoU:          {avg_miou:.4f}  ({avg_miou*100:.2f}%)")
+        print(f"Weighted mIoU: {avg_weighted_miou:.4f}  ({avg_weighted_miou*100:.2f}%)\n")

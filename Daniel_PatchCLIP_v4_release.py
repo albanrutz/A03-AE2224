@@ -195,61 +195,150 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
 # --- EXECUTION ---
 # =============================================================================
 
+"""clip_prompts = [
+    "drone view of a building", "drone view of a road", "drone view of a tree",
+    "drone view of low vegetation", "drone view of background clutter", 
+    "drone view of a car", "drone view of a human"
+]"""
 clip_prompts = [
-    "drone photo of a building", "drone photo of a road", "drone photo of a tree",
-    "drone photo of low vegetation", "drone photo of background clutter", 
-    "drone photo of a car", "drone photo of a human"
-]
+    "building", "road", "tree",
+    "low vegetation", "background clutter", 
+    "car", "human"
+    ]
 
 mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
 
 # --- THE SCALE-CLASS WEIGHT MATRIX ---
 # Format: { Patch_Size: { "class_key": weight_multiplier } }
 
+# Long prompts weights
+"""
 scale_class_matrix = {
-    448: { 
-        "building": 0.8, "road": 0.8, "tree": 0.8, "low_veg": 0.8, 
-        "clutter": 0.8, "car": 0.0, "human": 0.0 
+    448: {
+        "building": 1.0182,
+        "road": 0.3347,
+        "tree": 0.3707,
+        "low_veg": 0.5934,
+        "clutter": 1.2224,
+        "car": 0.0000,
+        "human": 0.0000,
     },
-    224: { 
-        "building": 1.0, "road": 1.0, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.5, "car": 0.0, "human": 0.0
+    224: {
+        "building": 2.2611,
+        "road": 2.3432,
+        "tree": 2.3511,
+        "low_veg": 0.5339,
+        "clutter": 2.2603,
+        "car": 0.0000,
+        "human": 0.0000,
     },
-    112: { 
-        "building": 1.2, "road": 1.2, "tree": 1.1, "low_veg": 1.1, 
-        "clutter": 1.7, "car": 1.4, "human": 0.0
+    112: {
+        "building": 2.3151,
+        "road": 0.5154,
+        "tree": 2.6982,
+        "low_veg": 0.6610,
+        "clutter": 0.8028,
+        "car": 0.6423,
+        "human": 0.0177,
     },
-    56: { 
-        "building": 0.5, "road": 1.0, "tree": 1.0, "low_veg": 1.0, 
-        "clutter": 1.2, "car": 1.6, "human": 5.0
+    56: {
+        "building": 0.1974,
+        "road": 0.4617,
+        "tree": 0.8353,
+        "low_veg": 0.5938,
+        "clutter": 0.5614,
+        "car": 2.8276,
+        "human": 4.6350,
     },
 }
 
-# --- THE HARD ACTIVATION GATE MATRIX ---
-# Format: { Patch_Size: { "class_key": minimum_probability_0_to_1 } }
 scale_threshold_matrix = {
-    448: { 
-        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
-        "clutter": 0.0, "car": 0.0, "human": 0.0 
+    112: {
+        "building": 0.0000,
+        "road": 0.0000,
+        "tree": 0.0000,
+        "low_veg": 0.0000,
+        "clutter": 0.0000,
+        "car": 0.8500,
+        "human": 0.0000,
     },
-    224: { 
-        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
-        "clutter": 0.0, "car": 0.0, "human": 0.0
+    56: {
+        "building": 0.0000,
+        "road": 0.0000,
+        "tree": 0.0000,
+        "low_veg": 0.0000,
+        "clutter": 0.0000,
+        "car": 0.8448,
+        "human": 0.8922,
     },
-    112: { 
-        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
-        "clutter": 0.0, "car": 0.7, "human": 0.0
+}"""
+
+#Short prompt weights:
+scale_class_matrix = {
+    448: {
+        "building": 1.5976,
+        "road": 0.3790,
+        "tree": 0.3184,
+        "low_veg": 0.3659,
+        "clutter": 0.3778,
+        "car": 0.0000,
+        "human": 0.0000,
     },
-    56: { 
-        "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0, 
-        "clutter": 0.0, "car": 0.7, "human": 0.85
+    224: {
+        "building": 2.4247,
+        "road": 2.5252,
+        "tree": 2.1396,
+        "low_veg": 0.4932,
+        "clutter": 5.2522,
+        "car": 0.0000,
+        "human": 0.0000,
+    },
+    112: {
+        "building": 2.8658,
+        "road": 0.4342,
+        "tree": 2.3137,
+        "low_veg": 0.5577,
+        "clutter": 0.7276,
+        "car": 0.6056,
+        "human": 0.0182,
+    },
+    56: {
+        "building": 0.8012,
+        "road": 0.4539,
+        "tree": 0.3487,
+        "low_veg": 0.4727,
+        "clutter": 0.5277,
+        "car": 4.0141,
+        "human": 11.7080,
     },
 }
-test_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1\Images"
+
+scale_threshold_matrix = {
+    112: {
+        "building": 0.0000,
+        "road": 0.0000,
+        "tree": 0.0000,
+        "low_veg": 0.0000,
+        "clutter": 0.0000,
+        "car": 0.8533,
+        "human": 0.0000,
+    },
+    56: {
+        "building": 0.0000,
+        "road": 0.0000,
+        "tree": 0.0000,
+        "low_veg": 0.0000,
+        "clutter": 0.0000,
+        "car": 0.8480,
+        "human": 0.6426,
+    },
+}
+test1_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1longprompt\Images"
+test2_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1shortprompt\Images"
 cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 
 sw_plot = False  # Set to False to skip visualization and just save predictions
-image_dir = cv_dir
+image_dir = test2_dir
 #image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
 image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
