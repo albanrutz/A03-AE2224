@@ -82,15 +82,11 @@ def segment_mask_to_rgb(global_seg_map, labels_order):
 # --- 4. THE CORE ARCHITECTURE ---
 # =============================================================================
 
-def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, scale_class_matrix, scale_threshold_matrix=None, sw_plot=True):
+def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, 
+                                       scale_class_matrix, model, preprocess, hook,
+                                       scale_threshold_matrix=None, sw_plot=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    # CRITICAL: RN50 is required for the SpatialLayerHook (CNN Architecture)
-    model, preprocess = clip.load("RN50", device=device)
-    model.eval()
-    
-    # Attach the hook to Layer 4
-    hook = SpatialLayerHook(model.visual.layer4)
 
     original_image = Image.open(image_path).convert("RGB")
     W_orig, H_orig = original_image.size
@@ -223,7 +219,6 @@ def exact_multi_scale_ensemble_matrix(image_path, clip_prompts, mapping_keys, sc
         weighted_local_tensor = local_scale_tensor * current_weight_array
         fused_prob_tensor += weighted_local_tensor
 
-    hook.close()
 
     # --- FINAL DECISION PHASE ---
     if fused_prob_tensor.max() > 0:
@@ -303,113 +298,91 @@ if __name__ == "__main__":
     
     mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
 
-    """scale_class_matrix = {
-        448: {
-            "building": 1.1,
-            "road": 1.5,
-            "tree": 1.2,
-            "low_veg": 1.0,
-            "clutter": 1.2,
-            "car": 0.0,
-            "human": 0.0
-        },
-        224: {
-            "building": 1.0,
-            "road": 1.3,
-            "tree": 1.1,
-            "low_veg": 1.0,
-            "clutter": 1.2,
-            "car": 1.0,
-            "human": 1.2,
-        },
-    }
-
-    scale_threshold_matrix = {
-        448: {
-                    "building": 0.0,
-                    "road": 0.0,
-                    "tree": 0.0,
-                    "low_veg": 0.0,
-                    "clutter": 0.0,
-                    "car": 0.0,
-                    "human": 0.0,
-            },
-        224: {
-            "building": 0.5,
-            "road": 0,
-            "tree": 0.5,
-            "low_veg": 0.4,
-            "clutter": 0.1,
-            "car": 0.85,
-            "human": 0.75,
-        }
-    }"""
-
     #Long label optimized weights 
     scale_class_matrix = {
         448: {
-            "building": 0.9810,
-            "road": 0.6498,
-            "tree": 0.7276,
-            "low_veg": 0.3784,
-            "clutter": 1.4474,
-            "car": 0.0000,
-            "human": 0.0000,
+            "building": 2.0568,
+            "road": 1.0033,
+            "tree": 2.5268,
+            "low_veg": 0.4517,
+            "clutter": 2.3220,
+            "car": 0.0336,
+            "human": 0.0376,
         },
         224: {
-            "building": 2.8208,
-            "road": 0.5397,
-            "tree": 3.2826,
-            "low_veg": 3.0060,
-            "clutter": 0.7609,
-            "car": 2.6541,
-            "human": 0.4433,
+            "building": 2.0341,
+            "road": 0.9921,
+            "tree": 2.7270,
+            "low_veg": 0.5175,
+            "clutter": 0.6656,
+            "car": 0.8189,
+            "human": 0.5891,
         },
     }
+
     scale_threshold_matrix = {
+        448: {
+            "building": 0.1971,
+            "road": 0.1320,
+            "tree": 0.2374,
+            "low_veg": 0.2141,
+            "clutter": 0.0822,
+            "car": 0.2608,
+            "human": 0.1350,
+        },
         224: {
-            "building": 0.2660,
-            "road": 0.0000,
-            "tree": 0.2510,
-            "low_veg": 0.3964,
-            "clutter": 0.1756,
-            "car": 0.8893,
-            "human": 0.6498,
+            "building": 0.2599,
+            "road": 0.1588,
+            "tree": 0.2443,
+            "low_veg": 0.3207,
+            "clutter": 0.1989,
+            "car": 0.9392,
+            "human": 0.8582,
         },
     }
     #short label optimized weights
         
-    scale_class_matrix = {
+    """scale_class_matrix = {
         448: {
-            "building": 2.4467,
-            "road": 0.6056,
-            "tree": 0.5274,
-            "low_veg": 0.4086,
-            "clutter": 0.6043,
-            "car": 0.0000,
-            "human": 0.0000,
+            "building": 2.0114,
+            "road": 0.9876,
+            "tree": 0.6198,
+            "low_veg": 0.3881,
+            "clutter": 2.2453,
+            "car": 0.0379,
+            "human": 0.0463,
         },
         224: {
-            "building": 2.6240,
-            "road": 0.5052,
-            "tree": 2.9124,
-            "low_veg": 3.0818,
-            "clutter": 4.1069,
-            "car": 3.8081,
-            "human": 2.7756,
+            "building": 2.0833,
+            "road": 0.8306,
+            "tree": 1.8445,
+            "low_veg": 0.3819,
+            "clutter": 3.0957,
+            "car": 0.2973,
+            "human": 1.8237,
         },
     }
+
     scale_threshold_matrix = {
-        224: {
-            "building": 0.2714,
-            "road": 0.0000,
-            "tree": 0.2719,
-            "low_veg": 0.5298,
-            "clutter": 0.0925,
-            "car": 0.8959,
-            "human": 0.5747,
+        448: {
+            "building": 0.2270,
+            "road": 0.2190,
+            "tree": 0.2075,
+            "low_veg": 0.2163,
+            "clutter": 0.0806,
+            "car": 0.2860,
+            "human": 0.1430,
         },
-    }
+        224: {
+            "building": 0.2625,
+            "road": 0.2102,
+            "tree": 0.3140,
+            "low_veg": 0.4830,
+            "clutter": 0.1584,
+            "car": 0.9388,
+            "human": 0.6767,
+        },
+    }"""
 
 
     # Define Image Directory
@@ -418,16 +391,21 @@ if __name__ == "__main__":
     cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 
 
-    image_dir = cv_dir
+    image_dir = test1_dir  # Change this to test2_dir or cv_dir as needed
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     # Execute Pipeline
-    sw_plot = True  # Set to False to skip visualization and process silently
+    sw_plot = False  # Set to False to skip visualization and process silently
     miou_lst = []
     weighted_miou_lst = []
     per_class_lst = []
     time_lst = []
     
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = clip.load("RN50", device=device)
+    model.eval()
+    hook = SpatialLayerHook(model.visual.layer4)
+
     for image_path in image_paths:
         print(f"\n{'='*60}")
         print(f"Processing: {os.path.basename(image_path)}")
@@ -439,7 +417,10 @@ if __name__ == "__main__":
             image_path, 
             clip_prompts, 
             mapping_keys, 
-            scale_class_matrix, 
+            scale_class_matrix,
+            model,
+            preprocess,
+            hook,
             scale_threshold_matrix=scale_threshold_matrix,
             sw_plot=sw_plot
         )
@@ -456,6 +437,10 @@ if __name__ == "__main__":
             per_class_lst.append(results)
             
         time_lst.append(time.time() - start_time)
+        # ADD THIS after each image:
+        del fused_class_map, fused_conf_map
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()  # Forces CUDA to actually flush all operations and free memory before the next image starts processing                                
 
     # --- FINAL PANDAS REPORTING ---
     if miou_lst:

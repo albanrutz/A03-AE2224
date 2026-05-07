@@ -562,7 +562,7 @@ if __name__ == "__main__":
     scale_class_matrix = {
         448: {
             "building": 1.1, "road": 1.5,  "tree": 1.2, "low_veg": 1.0,
-            "clutter":  1.2, "car":  0.0,  "human": 0.0,
+            "clutter":  1.2, "car":  0.1,  "human": 0.1,
         },
         224: {
             "building": 1.0, "road": 1.3,  "tree": 1.1, "low_veg": 1.0,
@@ -572,11 +572,11 @@ if __name__ == "__main__":
 
     scale_threshold_matrix = {
         448: {
-            "building": 0.0, "road": 0.0, "tree": 0.0, "low_veg": 0.0,
-            "clutter":  0.0, "car":  0.0, "human": 0.0,
+            "building": 0.1, "road": 0.1, "tree": 0.1, "low_veg": 0.1,
+            "clutter":  0.1, "car":  0.1, "human": 0.1,
         },
         224: {
-            "building": 0.5, "road": 0.0, "tree": 0.5, "low_veg": 0.4,
+            "building": 0.5, "road": 0.1, "tree": 0.5, "low_veg": 0.4,
             "clutter":  0.1, "car":  0.85, "human": 0.75,
         },
     }
