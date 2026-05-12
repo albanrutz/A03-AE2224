@@ -11,14 +11,20 @@ Set GT_IMAGE_PATH and PRED_IMAGE_PATH below, then run:
 """
 
 import os
+import json
+import argparse
 import numpy as np
 from PIL import Image
 
 # =============================================================================
 # INPUT FILE PATHS — set these before running
 # =============================================================================
-image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Predictions"  
+patch_long = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1longprompt"  
+patch_short = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1shortprompt"
+magi_long = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1longpromptMagiCLIP"
+magi_short = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1shortpromptMagiCLIP"
 
+image_dir = magi_short  # Change this to the directory containing your prediction images
 
 # =============================================================================
 # CATEGORY COLOUR MAP
@@ -226,6 +232,24 @@ def compute_miou(per_class_results):
     return np.mean(iou_values)
 
 
+def compute_weighted_miou(per_class_results):
+    """
+    Weighted mean IoU where each class is weighted by its share of total
+    ground-truth pixels (TP + FN = GT pixel count for that class).
+    Classes with zero GT pixels contribute zero weight and are effectively
+    excluded from the average.
+    """
+    gt_counts  = np.array([v["TP"] + v["FN"] for v in per_class_results.values()], dtype=np.float64)
+    iou_values = np.array([v["IoU"]           for v in per_class_results.values()], dtype=np.float64)
+
+    total_gt = gt_counts.sum()
+    if total_gt == 0:
+        return 0.0
+
+    weights = gt_counts / total_gt
+    return float(np.dot(weights, iou_values))
+
+
 def print_results(per_class_results, miou, image_name=None):
     """Pretty-print the evaluation results."""
     header = f"\n{'='*80}"
@@ -254,7 +278,10 @@ def print_results(per_class_results, miou, image_name=None):
 
 
 def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
-    """Evaluate a single ground-truth / prediction image pair."""
+    """Evaluate a single ground-truth / prediction image pair.
+
+    Returns: per_class, miou, weighted_miou, confusion
+    """
     num_classes = len(categories)
 
     gt_label   = image_to_label_array(gt_path,   colour_to_idx, num_classes)
@@ -269,8 +296,9 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
     confusion = compute_confusion_matrix(gt_label, pred_label, num_classes)
     per_class = per_class_metrics(confusion, categories)
     miou      = compute_miou(per_class)
+    weighted_miou = compute_weighted_miou(per_class)
 
-    return per_class, miou, confusion
+    return per_class, miou, weighted_miou, confusion
 
 
 # =============================================================================
@@ -278,38 +306,110 @@ def evaluate_pair(gt_path, pred_path, colour_to_idx, categories):
 # =============================================================================
 
 if __name__ == "__main__":
-    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))] 
+    parser = argparse.ArgumentParser(description="Evaluate UAVid-style prediction masks against ground-truth labels.")
+    parser.add_argument("--pred-dir", default=image_dir, help="Directory containing prediction images (default from file).")
+    parser.add_argument("--root-dir", default=None, help="Root dataset directory containing 'Images', 'Labels', and 'Predictions' subfolders. If provided, overrides --pred-dir.")
+    parser.add_argument("--no-pause", action="store_true", help="Do not prompt between images.")
+    parser.add_argument("--output-json", default=None, help="Path to save JSON summary. If omitted, saves to <pred-dir>/evaluation_summary.json")
+    args = parser.parse_args()
+
+    # Resolve predictions directory.
+    if args.root_dir:
+        pred_dir = os.path.join(args.root_dir, 'Predictions')
+    else:
+        pred_dir = args.pred_dir
+
+    # If the provided pred_dir looks like a dataset root (contains 'Images' or 'Labels'),
+    # prefer its 'Predictions' subfolder when available.
+    if os.path.isdir(pred_dir):
+        # If pred_dir has no image files but has a 'Predictions' child, use it.
+        files = [f for f in os.listdir(pred_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        if len(files) == 0:
+            alt = os.path.join(pred_dir, 'Predictions')
+            if os.path.isdir(alt):
+                pred_dir = alt
+
+    # Finalize image_paths from resolved pred_dir
+    if not os.path.isdir(pred_dir):
+        print(f"Predictions directory not found: {pred_dir}")
+        raise SystemExit(1)
+
+    image_paths = [os.path.join(pred_dir, f) for f in os.listdir(pred_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    if len(image_paths) == 0:
+        print(f"No images found in {pred_dir}")
+        raise SystemExit(1)
+
     num_categories = 8 - (1 if MERGE_CARS else 0) - (1 if MERGE_VEGETATION else 0)
     per_class_running = np.zeros((num_categories, 10))
-    miou_running = 0
+    miou_running = 0.0
+    metrics_summary = {}
+
+    categories, _ = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION)
+
+    if MERGE_CARS:
+        print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
+    if MERGE_VEGETATION:
+        print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
+
     for PRED_IMAGE_PATH in image_paths:
-         GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")   # Path to the ground-truth label image
-         categories, colour_to_idx = build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION)
+        base = os.path.basename(PRED_IMAGE_PATH)
+        if args.root_dir:
+            GT_IMAGE_PATH = os.path.join(args.root_dir, 'Labels', base)
+        else:
+            GT_IMAGE_PATH = PRED_IMAGE_PATH.replace("Predictions", "Labels")
 
-         if MERGE_CARS:
-             print("Note: 'Static Car' and 'Moving Car' are merged into 'Car'.")
+        if not os.path.exists(GT_IMAGE_PATH):
+            print(f"[-] Ground Truth not found for {base}. Skipping")
+            continue
 
-         if MERGE_VEGETATION:
-             print("Note: 'Tree' and 'Low Vegetation' are merged into 'Vegetation'.")
+        per_class, miou, weighted_miou, confusion = evaluate_pair(
+            GT_IMAGE_PATH, PRED_IMAGE_PATH, build_colour_index(CATEGORY_COLOURS, merge_cars=MERGE_CARS, merge_vegetation=MERGE_VEGETATION)[1],
+            categories
+        )
 
-         per_class, miou, _ = evaluate_pair(
-             GT_IMAGE_PATH, PRED_IMAGE_PATH, colour_to_idx, categories
-         )
-         per_class_list = []
-         for category in per_class.keys():
-             per_class_list.append([*per_class[category].values()])
-        #  print(per_class_list)#
-        #  print(per_class_running)
-         per_class_running += np.array(per_class_list)
-         miou_running += miou
-         print_results(per_class, miou, image_name=os.path.basename(PRED_IMAGE_PATH))
-         input("Press Enter to continue to the next image...")
-    
-    per_class_running /= len(image_paths)
-    miou_running /= len(image_paths)
+        # Build per-class list for running average
+        per_class_list = []
+        for category in per_class.keys():
+            per_class_list.append([*per_class[category].values()])
+
+        per_class_running += np.array(per_class_list)
+        miou_running += miou
+
+        # Compute global precision/recall (micro) across all classes
+        total_TP = sum(v["TP"] for v in per_class.values())
+        total_FP = sum(v["FP"] for v in per_class.values())
+        total_FN = sum(v["FN"] for v in per_class.values())
+        precision = total_TP / (total_TP + total_FP) if (total_TP + total_FP) > 0 else 0.0
+        recall = total_TP / (total_TP + total_FN) if (total_TP + total_FN) > 0 else 0.0
+
+        # Save per-file metrics into the summary dict
+        base = os.path.basename(PRED_IMAGE_PATH)
+        metrics_summary[base] = [float(miou), float(weighted_miou), float(precision), float(recall)]
+
+        # Print per-image results
+        print_results(per_class, miou, image_name=base)
+
+
+    # Finalize averages
+    processed = len(metrics_summary)
+    if processed == 0:
+        print("No images processed. Exiting.")
+        raise SystemExit(0)
+
+    per_class_running /= processed
+    miou_running /= processed
+
     per_class_overall = {}
-    for i, category in enumerate(per_class.keys()):
+    last_per_class = per_class
+    for i, category in enumerate(last_per_class.keys()):
         per_class_overall[category] = {}
-        for j, metric in enumerate(per_class[category].keys()):
+        for j, metric in enumerate(last_per_class[category].keys()):
             per_class_overall[category][metric] = per_class_running[i][j]
+
     print_results(per_class_overall, miou_running, image_name='Overall')
+
+    # Write JSON summary
+    out_json = args.output_json or os.path.join(args.pred_dir, 'evaluation_summary.json')
+    with open(out_json, 'w', encoding='utf-8') as fh:
+        json.dump(metrics_summary, fh, indent=2)
+    print(f"Saved per-file JSON summary to: {out_json}")
