@@ -230,7 +230,7 @@ mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"
 # Format: { Patch_Size: { "class_key": weight_multiplier } }
 
 # Long prompts weights
-"""
+
 scale_class_matrix = {
     448: {
         "building": 1.0182,
@@ -289,10 +289,10 @@ scale_threshold_matrix = {
         "car": 0.8448,
         "human": 0.8922,
     },
-}"""
+}
 
 #Short prompt weights:
-scale_class_matrix = {
+"""scale_class_matrix = {
     448: {
         "building": 1.5976,
         "road": 0.3790,
@@ -351,14 +351,15 @@ scale_threshold_matrix = {
         "human": 0.6426,
     },
 }
+"""
 test1_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1longprompt\Images"
 test2_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_train\seq1shortprompt\Images"
 cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 
-sw_plot = False  # Set to False to skip visualization and just save predictions
-image_dir = test2_dir
+sw_plot = True  # Set to False to skip visualization and just save predictions
+image_dir = test1_dir
 #image_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq16\Images"
-image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))][8:]
     
 miou_lst = []
 weighted_miou_lst = []

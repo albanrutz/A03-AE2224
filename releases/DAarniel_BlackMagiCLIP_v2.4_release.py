@@ -300,7 +300,7 @@ if __name__ == "__main__":
     mapping_keys = ["building", "road", "tree", "low_veg", "clutter", "car", "human"]
 
     #Long label optimized weights 
-    """scale_class_matrix = {
+    scale_class_matrix = {
         448: {
             "building": 0.9810,
             "road": 0.6498,
@@ -331,10 +331,10 @@ if __name__ == "__main__":
             "human": 0.6498,
         },
     }
-"""
+
     #short label optimized weights
         
-    scale_class_matrix = {
+    """scale_class_matrix = {
         448: {
             "building": 2.4467,
             "road": 0.6056,
@@ -364,7 +364,7 @@ if __name__ == "__main__":
             "car": 0.8959,
             "human": 0.5747,
         },
-    }
+    }"""
 
 
 
@@ -375,8 +375,8 @@ if __name__ == "__main__":
     cv_dir = r"C:\Users\danie\Desktop\Delft archive\AE2224\archive\uavid_val\seq67\Images"
 
 
-    image_dir = test2_dir  # Change this to test2_dir or cv_dir as needed
-    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    image_dir = test1_dir  # Change this to test2_dir or cv_dir as needed
+    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))][8:]
 
     # Execute Pipeline
     sw_plot = True  # Set to False to skip visualization and process silently
