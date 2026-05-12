@@ -21,7 +21,7 @@ from tqdm import tqdm
 import os
 import time
 import pandas as pd
-from releases.support.scoring_general import save_and_evaluate_single_image
+from support.scoring_general import save_and_evaluate_single_image
 
 # =============================================================================
 # --- 1. HARDWARE & CONTEXT INITIALIZATION ---

@@ -114,7 +114,7 @@ plt.show()
 # Import evaluation functions from scoring_general.py
 import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  # Adjust path if needed
-from scoring_general import (
+from releases.support.scoring_general import (
     CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
 )
 

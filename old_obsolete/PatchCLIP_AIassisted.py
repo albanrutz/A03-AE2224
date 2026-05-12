@@ -8,7 +8,7 @@ import matplotlib.patches as mpatches
 from PIL import Image
 from tqdm import tqdm
 import os
-from scoring_general import save_and_evaluate_single_image
+from releases.support.scoring_general import save_and_evaluate_single_image
 import time
 import pandas as pd
 

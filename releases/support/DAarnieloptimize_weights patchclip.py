@@ -46,7 +46,7 @@ import clip
 from PIL import Image
 from tqdm import tqdm
 
-from scoring_general import (
+from support.scoring_general import (
     CATEGORY_COLOURS,
     validate_colour_map,
     build_colour_index,

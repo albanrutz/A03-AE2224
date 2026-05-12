@@ -145,7 +145,7 @@ plt.show()
 print("Calculating mIoU metrics...")
 import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  
-from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
+from releases.support.scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
 
 pred_path = "predicted_segmentation.png"
 Image.fromarray(overlay).save(pred_path) 

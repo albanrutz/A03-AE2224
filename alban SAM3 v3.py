@@ -14,7 +14,7 @@ huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
 # Import evaluation functions
 import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  
-from scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
+from releases.support.scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
 
 # 1. Locate Local Dataset
 print("Locating local UAVid dataset...")
