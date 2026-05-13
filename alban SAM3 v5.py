@@ -57,11 +57,12 @@ start_time_total = time.time()
 
 # 1. Locate Local Dataset
 print("Locating local UAVid dataset...")
-images_dir = r"C:\Users\x3non\Desktop\q3 project y2\seq67\Images"
-labels_dir = r"C:\Users\x3non\Desktop\q3 project y2\seq67\Labels"
+images_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid_train\seq1\Images"
+labels_dir = r"C:\Users\x3non\Desktop\q3 project y2\uavid_train\seq1\Labels"
 
-image_files = sorted(glob.glob(os.path.join(images_dir, "*.png")))
-label_files = sorted(glob.glob(os.path.join(labels_dir, "*.png")))
+# Grab files and limit to the first 200
+image_files = sorted(glob.glob(os.path.join(images_dir, "*.png")))[:200]
+label_files = sorted(glob.glob(os.path.join(labels_dir, "*.png")))[:200]
 
 if not image_files or len(image_files) != len(label_files):
     raise ValueError(f"Found {len(image_files)} images and {len(label_files)} labels.")
@@ -86,17 +87,17 @@ color_array = np.array(list(uavid_gt_colors.values()), dtype=np.uint8)
 model_load_start = time.time()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-print("Loading SAM3 model...")
 model = Sam3Model.from_pretrained(
     "facebook/sam3", 
     torch_dtype=torch.bfloat16,
-    attn_implementation="sdpa" # Changed from flash_attention_2
+    attn_implementation="sdpa",
+    local_files_only=True  # Add this
 ).to(device)
 
-# Speed Optimization 2: Compile model (requires PyTorch 2.0+)
-print("Compiling model for faster inference (this may take a moment)...")
-
-processor = Sam3Processor.from_pretrained("facebook/sam3")
+processor = Sam3Processor.from_pretrained(
+    "facebook/sam3",
+    local_files_only=True  # Add this
+)
 model_load_time = time.time() - model_load_start
 print(f"Model loaded and compiled in {model_load_time:.2f}s")
 
@@ -215,6 +216,26 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
 
 # Final Global Metrics
 final_fwiou = calculate_fwiou(global_confusion_matrix)
+
+# --- NEW: Calculate Precision, Recall, and F1-Score ---
+TP = np.diag(global_confusion_matrix)
+GT_total = np.sum(global_confusion_matrix, axis=1)   # Actual positive instances per class
+Pred_total = np.sum(global_confusion_matrix, axis=0) # Predicted positive instances per class
+
+# Calculate class-wise metrics, handling division by zero safely
+precision_per_class = np.divide(TP, Pred_total, out=np.zeros_like(TP, dtype=float), where=Pred_total != 0)
+recall_per_class = np.divide(TP, GT_total, out=np.zeros_like(TP, dtype=float), where=GT_total != 0)
+
+# F1 Score = 2 * (Precision * Recall) / (Precision + Recall)
+f1_denominator = precision_per_class + recall_per_class
+f1_per_class = np.divide(2 * (precision_per_class * recall_per_class), f1_denominator, out=np.zeros_like(TP, dtype=float), where=f1_denominator != 0)
+
+# Calculate Macro-Averages
+mean_precision = np.mean(precision_per_class)
+mean_recall = np.mean(recall_per_class)
+mean_f1 = np.mean(f1_per_class)
+# --------------------------------------------------------
+
 total_time = time.time() - start_time_total
 
 print(f"\n{'='*50}")
@@ -222,6 +243,13 @@ print(f"=== BATCH COMPLETE ===")
 print(f"{'='*50}")
 print(f"Average mIoU (Mean of image means): {total_miou / len(image_files):.4f}")
 print(f"Global FWIoU (Frequency-Weighted):  {final_fwiou:.4f}")
+print(f"Global Precision (Macro Mean):      {mean_precision:.4f}")
+print(f"Global Recall (Macro Mean):         {mean_recall:.4f}")
+print(f"Global F1-Score (Macro Mean):       {mean_f1:.4f}")
+print(f"\n--- Per-Class Metrics ---")
+for i, cls_name in enumerate(class_names):
+    print(f"{cls_name.ljust(20)} | Precision: {precision_per_class[i]:.4f} | Recall: {recall_per_class[i]:.4f} | F1: {f1_per_class[i]:.4f}")
+
 print(f"\nTiming Summary:")
 print(f"  Model load/compile: {model_load_time:.2f}s")
 print(f"  Total processing: {total_time:.2f}s ({timedelta(seconds=int(total_time))})")
