@@ -8,19 +8,15 @@ from transformers import Sam3Model, Sam3Processor
 import time
 from datetime import timedelta
 
-# --- magic bug fix by gemini ---
 import huggingface_hub.dataclasses
 huggingface_hub.dataclasses.type_validator = lambda *args, **kwargs: None
-# ---- thank you mr clanker -----
 
 # Import evaluation functions
 import sys
 sys.path.append(r"C:\Users\x3non\OneDrive\Desktop\A03-AE2224")  
 from releases.support.scoring_general import CATEGORY_COLOURS, build_colour_index, evaluate_pair, print_results
 
-# ==========================================
 # FWIoU & Confusion Matrix Helper Functions
-# ==========================================
 def fast_hist(a, b, n):
     """Calculates a fast 2D confusion matrix (histogram)."""
     k = (a >= 0) & (a < n)
@@ -123,7 +119,7 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
 
     global_scores = np.zeros((num_classes, H, W), dtype=np.float32)
 
-    tile_size = 1024
+    tile_size = 1024 # Change overlap
     stride = 1024
     
     def get_tiles(width, height, tile_size, stride):
@@ -146,7 +142,6 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
         for tile_idx, (x1, y1, x2, y2) in enumerate(tiles):
             tile_pil = image_pil.crop((x1, y1, x2, y2))
             
-            # Speed Optimization 3: Batch all 7 prompts together
             images_batch = [tile_pil] * num_classes
             
             inputs = processor(images=images_batch, text=all_prompts, return_tensors="pt").to(device)
@@ -156,12 +151,11 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
             
             results = processor.post_process_instance_segmentation(
                 outputs,
-                threshold=0.35,       # Tweak these later for mIoU/FWIoU tuning
+                threshold=0.35,       # Change these later for mIoU/FWIoU tuning
                 mask_threshold=0.35,
                 target_sizes=inputs.get("original_sizes").tolist()
             )
             
-            # Process results for each class in the batch
             for class_idx, class_result in enumerate(results):
                 masks = class_result["masks"].cpu().to(torch.float32).numpy()
                 
@@ -217,7 +211,7 @@ for img_idx, (img_path, lbl_path) in enumerate(zip(image_files, label_files)):
 # Final Global Metrics
 final_fwiou = calculate_fwiou(global_confusion_matrix)
 
-# --- NEW: Calculate Precision, Recall, and F1-Score ---
+# Calculate Precision, Recall, and F1-Score
 TP = np.diag(global_confusion_matrix)
 GT_total = np.sum(global_confusion_matrix, axis=1)   # Actual positive instances per class
 Pred_total = np.sum(global_confusion_matrix, axis=0) # Predicted positive instances per class
